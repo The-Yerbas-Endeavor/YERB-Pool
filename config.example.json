@@ -1,0 +1,16 @@
+{
+  "rpc": {
+    "url": "http://127.0.0.1:15419",
+    "user": "CHANGE_ME",
+    "password": "CHANGE_ME"
+  },
+  "stratum": {
+    "host": "0.0.0.0",
+    "port": 3333,
+    "difficulty": 0.01
+  },
+  "database": "yerbpool.db",
+  "pool_address": "CHANGE_ME_YERB_ADDRESS",
+  "template_refresh_seconds": 5,
+  "log_level": "INFO"
+}

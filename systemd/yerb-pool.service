@@ -1,0 +1,18 @@
+[Unit]
+Description=YERB Mining Pool
+After=network-online.target yerbasd.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=yerbpool
+Group=yerbpool
+WorkingDirectory=/opt/YERB-Pool
+ExecStart=/usr/bin/python3 /opt/YERB-Pool/pool.py
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
