@@ -1,1 +1,1 @@
-# No third-party Python packages are required for the initial scaffold.
+# Python standard library only. Native GhostRider is built with CMake.

@@ -3,11 +3,13 @@ import logging
 import threading
 import time
 
+
 class JobManager:
     def __init__(self, rpc, cfg):
         self.rpc = rpc
         self.cfg = cfg
         self.current = None
+        self.jobs = {}
         self.lock = threading.Lock()
         self.listeners = set()
         self.counter = 0
@@ -30,15 +32,22 @@ class JobManager:
         with self.lock:
             old_prev = self.current["template"].get("previousblockhash") if self.current else None
             self.counter += 1
-            self.current = {"id": f"{int(time.time()):x}{self.counter:x}", "template": tpl}
+            job = {"id": f"{int(time.time()):x}{self.counter:x}", "template": tpl}
+            self.current = job
+            self.jobs[job["id"]] = job
+            while len(self.jobs) > 16:
+                self.jobs.pop(next(iter(self.jobs)))
             changed = tpl.get("previousblockhash") != old_prev
-        if changed:
-            await self.notify()
-        return self.current
+        await self.notify(clean=changed)
+        return job
 
     def snapshot(self):
         with self.lock:
             return self.current
+
+    def get(self, job_id):
+        with self.lock:
+            return self.jobs.get(job_id)
 
     def register(self, callback):
         self.listeners.add(callback)
@@ -46,9 +55,9 @@ class JobManager:
     def unregister(self, callback):
         self.listeners.discard(callback)
 
-    async def notify(self):
+    async def notify(self, clean):
         for cb in tuple(self.listeners):
             try:
-                await cb(self.snapshot(), True)
+                await cb(self.snapshot(), clean)
             except Exception:
                 logging.exception("Failed to notify miner of new job")
