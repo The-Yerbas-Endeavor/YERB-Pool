@@ -1,1 +1,0 @@
-Replace FetchContent Yerbas-Miner with FetchContent Yerbas Core and compile hash_selection.cpp plus required crypto/CryptoNight sources directly.
