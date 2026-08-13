@@ -1,0 +1,15 @@
+[Unit]
+Description=YERB Pool Web Dashboard
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/yerb-pool
+ExecStart=/usr/bin/python3 /opt/yerb-pool/web.py
+Restart=always
+RestartSec=3
+User=yerbpool
+Group=yerbpool
+
+[Install]
+WantedBy=multi-user.target
