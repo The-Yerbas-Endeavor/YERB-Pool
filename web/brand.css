@@ -30,6 +30,14 @@ header:after{
   color:rgba(101,196,102,.025);
   pointer-events:none;
 }
+.head:after{
+  content:"Block reward 80 YERB  •  Maturity 100 confirmations";
+  display:block;
+  margin-top:14px;
+  color:#8fa893;
+  font-size:12px;
+  letter-spacing:.3px;
+}
 .brand>div:first-child{position:relative;padding-left:60px}
 .brand>div:first-child:before{
   content:"Y";
@@ -54,6 +62,7 @@ header:after{
 .brand .muted{color:#9caf9d}
 nav a{padding:7px 9px;border-radius:7px;transition:.15s ease}
 nav a:hover{background:rgba(101,196,102,.10);color:var(--yerb-bright);text-decoration:none}
+nav a[href="/shares"]{display:none}
 a{color:#8edb91}
 .card,.chart-card,.metric,table,.empty{border-color:var(--yerb-border)!important}
 .card{background:linear-gradient(155deg,#1a201b,#171a17)}
@@ -86,4 +95,5 @@ main:after{
   .brand>div:first-child:before{width:40px;height:40px;font-size:22px}
   .brand h1{font-size:25px}
   .brand h1 a:after{display:none}
+  .head:after{margin-top:10px;font-size:11px}
 }
