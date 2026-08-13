@@ -9,6 +9,13 @@
     "port": 3333,
     "difficulty": 0.00001
   },
+  "payouts": {
+    "enabled": true,
+    "coinbase_maturity": 100,
+    "check_interval_seconds": 60,
+    "minimum_payout": "1.00000000",
+    "pool_fee_percent": 0.0
+  },
   "database": "yerbpool.db",
   "pool_address": "CHANGE_ME_YERB_ADDRESS",
   "template_refresh_seconds": 5,
