@@ -15,6 +15,7 @@ SERVICE_USER=yerbpool
 SSL_DOMAIN=""
 CERTBOT_PRESENT=false
 EXISTING_SSL_DOMAIN=""
+NGINX_SITE=/etc/nginx/sites-available/yerb-pool
 
 usage() {
     cat <<'EOF'
@@ -56,24 +57,31 @@ valid_domain() {
     [[ "$1" =~ ^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$ ]]
 }
 
-detect_existing_certbot() {
+detect_existing_https() {
     CERTBOT_PRESENT=false
     EXISTING_SSL_DOMAIN=""
 
-    if ! command -v certbot >/dev/null 2>&1; then
-        return 1
+    if command -v certbot >/dev/null 2>&1; then
+        CERTBOT_PRESENT=true
+        local cert_domain=""
+        cert_domain="$($SUDO certbot certificates 2>/dev/null | awk '/Certificate Name:/ {print $3; exit}' || true)"
+        if [[ -n "$cert_domain" ]] && valid_domain "$cert_domain" \
+           && [[ -f "/etc/letsencrypt/live/${cert_domain}/fullchain.pem" ]] \
+           && [[ -f "/etc/letsencrypt/live/${cert_domain}/privkey.pem" ]]; then
+            EXISTING_SSL_DOMAIN="$cert_domain"
+            return 0
+        fi
     fi
 
-    CERTBOT_PRESENT=true
-
-    local domain=""
-    domain="$($SUDO certbot certificates 2>/dev/null | awk '/Certificate Name:/ {print $3; exit}' || true)"
-
-    if [[ -n "$domain" ]] && valid_domain "$domain" \
-       && [[ -f "/etc/letsencrypt/live/${domain}/fullchain.pem" ]] \
-       && [[ -f "/etc/letsencrypt/live/${domain}/privkey.pem" ]]; then
-        EXISTING_SSL_DOMAIN="$domain"
-        return 0
+    # Certbot discovery is not required for preservation. Fall back to the
+    # currently deployed Nginx site so upgrades never destroy a working site.
+    if [[ -f "$NGINX_SITE" ]]; then
+        local nginx_domain=""
+        nginx_domain="$(awk '/^[[:space:]]*server_name[[:space:]]+/ {for(i=2;i<=NF;i++){gsub(/;/,"",$i); if($i!="_" && $i!="localhost"){print $i; exit}}}' "$NGINX_SITE" 2>/dev/null || true)"
+        if [[ -n "$nginx_domain" ]] && valid_domain "$nginx_domain"; then
+            EXISTING_SSL_DOMAIN="$nginx_domain"
+            return 0
+        fi
     fi
 
     return 1
@@ -89,17 +97,15 @@ echo "Installing YERB Pool dependencies..."
 $SUDO apt-get update
 $SUDO apt-get install -y build-essential cmake git python3 sqlite3 libboost-dev nginx rsync
 
-# Detect Certbot before touching Nginx. Existing Certbot-managed Nginx files
-# must survive normal pool upgrades unchanged.
-detect_existing_certbot || true
+detect_existing_https || true
+if [[ -f "$NGINX_SITE" ]]; then
+    echo "Existing YERB Pool Nginx site detected; it will be preserved unchanged."
+fi
+if [[ -n "$EXISTING_SSL_DOMAIN" ]]; then
+    echo "Existing pool domain detected: ${EXISTING_SSL_DOMAIN}"
+fi
 if [[ "$CERTBOT_PRESENT" == true ]]; then
-    if [[ -n "$EXISTING_SSL_DOMAIN" ]]; then
-        echo "Existing Certbot HTTPS configuration detected for ${EXISTING_SSL_DOMAIN}."
-        echo "Normal upgrades will preserve the existing Nginx/SSL configuration."
-    else
-        echo "Certbot is already installed. Domain/SSL setup prompts will be skipped."
-        echo "Use --ssl DOMAIN if you intentionally want to configure or replace SSL."
-    fi
+    echo "Certbot is already installed."
 fi
 
 if ! id "$SERVICE_USER" >/dev/null 2>&1; then
@@ -206,22 +212,22 @@ $SUDO systemctl daemon-reload
 $SUDO systemctl enable yerb-pool yerb-pool-web
 
 echo "Checking Nginx configuration..."
-if [[ -n "$EXISTING_SSL_DOMAIN" && -f /etc/nginx/sites-available/yerb-pool ]]; then
-    echo "Preserving existing Certbot-managed Nginx site for ${EXISTING_SSL_DOMAIN}."
+if [[ -f "$NGINX_SITE" ]]; then
+    echo "Preserving existing Nginx site: $NGINX_SITE"
 else
-    echo "Installing default YERB Pool Nginx configuration..."
-    $SUDO cp "$ROOT/nginx/yerb-pool.conf" /etc/nginx/sites-available/yerb-pool
+    echo "No existing pool site found; installing default YERB Pool Nginx configuration."
+    $SUDO cp "$ROOT/nginx/yerb-pool.conf" "$NGINX_SITE"
 fi
-$SUDO ln -sf /etc/nginx/sites-available/yerb-pool /etc/nginx/sites-enabled/yerb-pool
+$SUDO ln -sf "$NGINX_SITE" /etc/nginx/sites-enabled/yerb-pool
 $SUDO rm -f /etc/nginx/sites-enabled/default
 $SUDO nginx -t
 $SUDO systemctl enable nginx
-$SUDO systemctl restart nginx
+$SUDO systemctl reload nginx 2>/dev/null || $SUDO systemctl restart nginx
 
 if command -v ufw >/dev/null 2>&1; then
     $SUDO ufw allow 80/tcp >/dev/null || true
     $SUDO ufw allow 3333/tcp >/dev/null || true
-    if [[ "$CERTBOT_PRESENT" == true ]]; then
+    if [[ "$CERTBOT_PRESENT" == true || -n "$EXISTING_SSL_DOMAIN" ]]; then
         $SUDO ufw allow 443/tcp >/dev/null || true
     fi
 fi
@@ -240,7 +246,7 @@ fi
 configure_nginx_domain() {
     local domain="$1"
     echo "Configuring Nginx for ${domain}..."
-    $SUDO tee /etc/nginx/sites-available/yerb-pool >/dev/null <<EOF
+    $SUDO tee "$NGINX_SITE" >/dev/null <<EOF
 server {
     listen 80;
     listen [::]:80;
@@ -263,7 +269,7 @@ server {
     error_log /var/log/nginx/yerb-pool-error.log;
 }
 EOF
-    $SUDO ln -sf /etc/nginx/sites-available/yerb-pool /etc/nginx/sites-enabled/yerb-pool
+    $SUDO ln -sf "$NGINX_SITE" /etc/nginx/sites-enabled/yerb-pool
     $SUDO rm -f /etc/nginx/sites-enabled/default
     $SUDO nginx -t
     $SUDO systemctl reload nginx
@@ -390,16 +396,16 @@ if [[ -n "$SSL_DOMAIN" ]]; then
         configure_nginx_domain "$SSL_DOMAIN"
         install_certbot_ssl "$SSL_DOMAIN"
     fi
-elif [[ "$CERTBOT_PRESENT" == true ]]; then
-    if [[ -n "$EXISTING_SSL_DOMAIN" ]]; then
-        echo "Existing HTTPS configuration for ${EXISTING_SSL_DOMAIN} detected; skipping domain/Certbot setup."
+elif [[ -f "$NGINX_SITE" && -n "$EXISTING_SSL_DOMAIN" ]]; then
+    echo "Existing domain configuration for ${EXISTING_SSL_DOMAIN} detected; skipping domain/Certbot setup."
+    if cert_exists_for_domain "$EXISTING_SSL_DOMAIN"; then
         DASHBOARD_URL="https://${EXISTING_SSL_DOMAIN}/"
         $SUDO systemctl enable certbot.timer >/dev/null 2>&1 || true
         $SUDO systemctl start certbot.timer >/dev/null 2>&1 || true
-    else
-        echo "Certbot is already installed; skipping domain setup prompt."
-        echo "Run 'bash install.sh --ssl DOMAIN' if SSL still needs to be configured."
     fi
+elif [[ "$CERTBOT_PRESENT" == true ]]; then
+    echo "Certbot is already installed; skipping domain setup prompt."
+    echo "Run 'bash install.sh --ssl DOMAIN' only if SSL still needs to be configured."
 elif [[ -t 0 ]]; then
     configure_domain_interactive
 else
