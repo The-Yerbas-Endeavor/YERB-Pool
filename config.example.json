@@ -7,7 +7,7 @@
   "stratum": {
     "host": "0.0.0.0",
     "port": 3333,
-    "difficulty": 0.00001
+    "difficulty": 0.000001
   },
   "payouts": {
     "enabled": true,
