@@ -44,7 +44,9 @@ class PayoutManager:
                 self.db.orphan_block(block["id"])
                 continue
 
-            self.db.update_block_confirmations(block["id"], confirmations)
+            self.db.update_block_confirmations(
+                block["id"], confirmations, self.maturity_confirmations
+            )
             if confirmations >= self.maturity_confirmations:
                 if self.db.mature_block(block["id"]):
                     logging.warning(
@@ -72,9 +74,6 @@ class PayoutManager:
             payout_id, len(items), total_atomic / COIN,
         )
 
-        # Lock these balances before talking to the wallet. If the RPC response
-        # is lost after broadcast, the batch becomes 'uncertain' and is never
-        # automatically paid a second time.
         self.db.mark_payout_broadcasting(payout_id)
         try:
             txid = await asyncio.to_thread(
