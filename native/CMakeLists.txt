@@ -18,11 +18,9 @@ FetchContent_Declare(
     GIT_REPOSITORY https://github.com/The-Yerbas-Endeavor/yerbas.git
     GIT_TAG 65c6b6336bf9cc0eb7fa125ed5aa983a17e6fe7a
     GIT_SHALLOW FALSE
+    SOURCE_SUBDIR __yerbpool_no_subdir__
 )
-FetchContent_GetProperties(yerbas_core)
-if(NOT yerbas_core_POPULATED)
-    FetchContent_Populate(yerbas_core)
-endif()
+FetchContent_MakeAvailable(yerbas_core)
 
 set(YERBAS_CORE_SRC "${yerbas_core_SOURCE_DIR}/src")
 set(YERBAS_GR_CORE_SOURCES
@@ -74,10 +72,8 @@ target_include_directories(yerb_ghostrider PRIVATE
     ${YERBAS_CORE_SRC}
 )
 
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-    target_compile_options(yerb_ghostrider PRIVATE
-        -include "${CMAKE_CURRENT_SOURCE_DIR}/glibc_endian_compat.h"
-    )
-endif()
+# Do not force Yerbas Core's legacy compat/endian.h on modern Linux/glibc.
+# glibc already provides htole*/be* helpers; forcing both causes redefinitions
+# with GCC 15 / Ubuntu 26.
 
 set_target_properties(yerb_ghostrider PROPERTIES OUTPUT_NAME "yerb_ghostrider")
