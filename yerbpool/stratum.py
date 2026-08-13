@@ -69,6 +69,7 @@ class MinerSession:
         self.worker = None
         self.authorized = False
         self.subscribed = False
+        self.extranonce_subscribed = False
         self.extranonce1 = os.urandom(4).hex()
         self.seen = set()
 
@@ -114,6 +115,15 @@ class MinerSession:
             if self.authorized:
                 self.pool.db.get_or_create_worker(self.worker)
             await self.send({"id": rid, "result": self.authorized, "error": None})
+            return
+
+        if method == "mining.extranonce.subscribe":
+            # cpuminer-opt-gr subscribes to extranonce updates after authorize.
+            # YERB-Pool currently keeps the per-session extranonce fixed, so
+            # acknowledging the subscription is sufficient and prevents the
+            # miner from treating the method as unsupported/reconnecting.
+            self.extranonce_subscribed = True
+            await self.send({"id": rid, "result": True, "error": None})
             return
 
         if method == "mining.submit":
