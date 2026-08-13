@@ -78,6 +78,25 @@ section h2:before{content:"";display:inline-block;width:4px;height:.9em;border-r
 .badge{border-color:#3a5140;background:#19201a}
 code{color:#cae9cb}
 .metric strong{color:#e9f7ea}
+
+/* The dashboard is the only route whose first direct child is the summary grid. */
+main#app>.grid:first-child:before{
+  content:"CONNECT TO YERB POOL\A\A Stratum: stratum+tcp://pool.yerbas.org:3333\A Username: YOUR_YERB_ADDRESS.worker\A Password: x\A Algorithm: GhostRider\A\A Example: cpuminer-opt-gr -a gr -o stratum+tcp://pool.yerbas.org:3333 -u YOUR_YERB_ADDRESS.rig1 -p x";
+  white-space:pre-wrap;
+  grid-column:1/-1;
+  display:block;
+  padding:18px 20px;
+  border:1px solid #3d6848;
+  border-left:4px solid var(--yerb);
+  border-radius:10px;
+  background:linear-gradient(135deg,rgba(101,196,102,.10),rgba(20,27,22,.96));
+  color:#dcebdd;
+  font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  font-size:13px;
+  line-height:1.55;
+  box-shadow:0 8px 28px rgba(0,0,0,.15);
+}
+
 main:after{
   content:"YERB Pool • Powered by the Yerbas network • GhostRider";
   display:block;
@@ -96,4 +115,5 @@ main:after{
   .brand h1{font-size:25px}
   .brand h1 a:after{display:none}
   .head:after{margin-top:10px;font-size:11px}
+  main#app>.grid:first-child:before{font-size:11px;padding:15px;overflow-wrap:anywhere}
 }
