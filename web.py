@@ -271,6 +271,7 @@ class Handler(BaseHTTPRequestHandler):
     def serve_file(self, target):
         if target == WEB_ROOT / "index.html":
             text = target.read_text()
+            text = text.replace("</head>", '<link rel="stylesheet" href="/brand.css?v=1"></head>')
             body = text.replace("</body>", LUCK_SCRIPT + "</body>").encode()
         else:
             body = target.read_bytes()
