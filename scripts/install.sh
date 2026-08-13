@@ -21,58 +21,78 @@ if ! id "$SERVICE_USER" >/dev/null 2>&1; then
     $SUDO useradd --system --home "$INSTALL_DIR" --shell /usr/sbin/nologin "$SERVICE_USER"
 fi
 
-if [[ ! -f config.json ]]; then
+# Create a source config for first install only. Existing production config in
+# /opt/yerb-pool is never overwritten by subsequent installer runs.
+if [[ ! -f config.json && ! -f "$INSTALL_DIR/config.json" ]]; then
     cp config.example.json config.json
     echo "Created config.json from config.example.json"
-else
-    echo "Keeping existing config.json"
 fi
 
 echo "Building native GhostRider verifier..."
 ./scripts/build-native.sh
 
-echo "Creating/upgrading pool database..."
-python3 ./scripts/init-db.py
-
-DB_PATH=$(python3 - <<'PY'
-import json
-from pathlib import Path
-root = Path.cwd()
-config = json.loads((root / 'config.json').read_text())
-p = Path(config.get('database', 'yerbpool.db'))
-print(p if p.is_absolute() else root / p)
-PY
-)
-
 echo "Installing pool to $INSTALL_DIR..."
 $SUDO mkdir -p "$INSTALL_DIR"
+
+# Never overwrite live accounting/configuration during an upgrade.
 $SUDO rsync -a --delete \
   --exclude '.git/' \
+  --exclude 'config.json' \
+  --exclude '*.db' \
+  --exclude '*.db-wal' \
+  --exclude '*.db-shm' \
   --exclude 'native/build/' \
   "$ROOT/" "$INSTALL_DIR/"
 
-# Preserve/copy built GhostRider library into installed tree.
 $SUDO mkdir -p "$INSTALL_DIR/native/build"
 if [[ -f "$ROOT/native/build/libyerb_ghostrider.so" ]]; then
     $SUDO cp "$ROOT/native/build/libyerb_ghostrider.so" "$INSTALL_DIR/native/build/"
 fi
 
+# First install: copy the configured source file. Upgrades: keep live config.
+if [[ ! -f "$INSTALL_DIR/config.json" ]]; then
+    if [[ -f "$ROOT/config.json" ]]; then
+        $SUDO cp "$ROOT/config.json" "$INSTALL_DIR/config.json"
+    else
+        $SUDO cp "$ROOT/config.example.json" "$INSTALL_DIR/config.json"
+    fi
+fi
+
+# Migrate only the original testing default. Do not touch any other user
+# settings or a deliberately customized difficulty.
+$SUDO python3 - "$INSTALL_DIR/config.json" <<'PY'
+import json
+import sys
+from pathlib import Path
+p = Path(sys.argv[1])
+cfg = json.loads(p.read_text())
+stratum = cfg.setdefault("stratum", {})
+old = float(stratum.get("difficulty", 0.000001))
+if abs(old - 0.00001) < 1e-15:
+    stratum["difficulty"] = 0.000001
+    p.write_text(json.dumps(cfg, indent=2) + "\n")
+    print("Migrated Stratum test difficulty: 1e-05 -> 1e-06")
+else:
+    print(f"Keeping configured Stratum difficulty: {old:g}")
+PY
+
 $SUDO chown -R "$SERVICE_USER:$SERVICE_USER" "$INSTALL_DIR"
 $SUDO chmod 600 "$INSTALL_DIR/config.json" 2>/dev/null || true
 
-# If the configured database is inside the source checkout, copy it to installed tree.
-if [[ "$DB_PATH" == "$ROOT"/* ]]; then
-    REL_DB="${DB_PATH#$ROOT/}"
-    $SUDO mkdir -p "$INSTALL_DIR/$(dirname "$REL_DB")"
-    $SUDO cp "$DB_PATH" "$INSTALL_DIR/$REL_DB"
-    $SUDO chown "$SERVICE_USER:$SERVICE_USER" "$INSTALL_DIR/$REL_DB"
-fi
+echo "Creating/upgrading production pool database..."
+(
+  cd "$INSTALL_DIR"
+  if [[ -n "$SUDO" ]]; then
+      $SUDO -u "$SERVICE_USER" /usr/bin/python3 ./scripts/init-db.py
+  else
+      runuser -u "$SERVICE_USER" -- /usr/bin/python3 ./scripts/init-db.py
+  fi
+)
 
 echo "Installing systemd services..."
 $SUDO cp "$ROOT/systemd/yerb-pool.service" /etc/systemd/system/yerb-pool.service
 $SUDO cp "$ROOT/systemd/yerb-pool-web.service" /etc/systemd/system/yerb-pool-web.service
 
-# Normalize existing pool service paths/user for /opt installation.
 $SUDO sed -i \
   -e 's#WorkingDirectory=.*#WorkingDirectory=/opt/yerb-pool#' \
   -e 's#ExecStart=.*#ExecStart=/usr/bin/python3 /opt/yerb-pool/pool.py#' \
@@ -96,9 +116,11 @@ if command -v ufw >/dev/null 2>&1; then
     $SUDO ufw allow 3333/tcp >/dev/null || true
 fi
 
-# Start/restart services after files/config are installed.
+# Stop any stale manually launched checkout copy before binding production port.
+pkill -f "$ROOT/pool.py" 2>/dev/null || true
+
 $SUDO systemctl restart yerb-pool-web
-$SUDO systemctl restart yerb-pool || true
+$SUDO systemctl restart yerb-pool
 
 echo
 echo "YERB Pool installation complete."
