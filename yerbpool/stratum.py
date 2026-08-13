@@ -17,6 +17,7 @@ from yerbpool.block import (
     template_outputs,
 )
 from yerbpool.ghostrider import hash_header
+from yerbpool.rejections import ensure_rejection_schema, record_rejection
 
 
 def _fixed_hex(value, size):
@@ -33,6 +34,7 @@ class StratumServer:
         self.jobs = jobs
         self.db = db
         self.payouts = payouts
+        ensure_rejection_schema(self.db)
         self.difficulty = float(cfg["stratum"].get("difficulty", 0.05))
         vardiff = cfg["stratum"].get("vardiff", {})
         self.vardiff_enabled = bool(vardiff.get("enabled", False))
@@ -94,6 +96,27 @@ class MinerSession:
     async def send(self, obj):
         self.writer.write((json.dumps(obj, separators=(",", ":")) + "\n").encode())
         await self.writer.drain()
+
+    def record_reject(self, reason, job_id="", hash_hex=None):
+        if not self.authorized or not self.worker:
+            return None
+        try:
+            return record_rejection(
+                self.pool.db,
+                self.worker,
+                job_id,
+                self.difficulty,
+                reason,
+                hash_hex,
+            )
+        except Exception:
+            logging.exception(
+                "Failed to persist rejected share worker=%s job=%s reason=%s",
+                self.worker,
+                job_id,
+                reason,
+            )
+            return None
 
     async def send_difficulty(self):
         await self.send({"id": None, "method": "mining.set_difficulty",
@@ -223,12 +246,14 @@ class MinerSession:
                              "error": [24, "unauthorized", None]})
             return
         if len(params) < 5:
+            self.record_reject("invalid mining.submit", params[1] if len(params) > 1 else "")
             await self.send({"id": rid, "result": False,
                              "error": [20, "invalid mining.submit", None]})
             return
 
         worker, job_id, extranonce2, ntime_hex, nonce_hex = map(str, params[:5])
         if worker != self.worker:
+            self.record_reject("worker mismatch", job_id)
             await self.send({"id": rid, "result": False,
                              "error": [24, "worker mismatch", None]})
             return
@@ -238,6 +263,7 @@ class MinerSession:
         if (not job or not current or
                 job["template"].get("previousblockhash") !=
                 current["template"].get("previousblockhash")):
+            self.record_reject("stale job", job_id)
             await self.send({"id": rid, "result": False,
                              "error": [21, "stale job", None]})
             return
@@ -247,12 +273,14 @@ class MinerSession:
             ntime_hex = _fixed_hex(ntime_hex, 4)
             nonce_hex = _fixed_hex(nonce_hex, 4)
         except ValueError as exc:
+            self.record_reject(str(exc), job_id)
             await self.send({"id": rid, "result": False,
                              "error": [20, str(exc), None]})
             return
 
         duplicate_key = (job_id, extranonce2, ntime_hex, nonce_hex)
         if duplicate_key in self.seen:
+            self.record_reject("duplicate share", job_id)
             await self.send({"id": rid, "result": False,
                              "error": [22, "duplicate share", None]})
             return
@@ -261,6 +289,7 @@ class MinerSession:
         tpl = job["template"]
         ntime = int(ntime_hex, 16)
         if ntime < int(tpl.get("mintime", 0)):
+            self.record_reject("ntime below mintime", job_id)
             await self.send({"id": rid, "result": False,
                              "error": [20, "ntime below mintime", None]})
             return
@@ -282,8 +311,8 @@ class MinerSession:
         network_target = int(target_hex, 16) if isinstance(target_hex, str) and target_hex else compact_target(tpl["bits"])
 
         if hash_value > s_target:
-            self.pool.db.add_share(self.worker, job_id, share_diff, False,
-                                   False, pow_hash[::-1].hex())
+            reject_hash = pow_hash[::-1].hex()
+            self.record_reject("low difficulty share", job_id, reject_hash)
             await self.send({"id": rid, "result": False,
                              "error": [23, "low difficulty share", None]})
             return
