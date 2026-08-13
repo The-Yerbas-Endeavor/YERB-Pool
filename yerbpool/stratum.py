@@ -18,6 +18,13 @@ from yerbpool.block import (
 from yerbpool.ghostrider import hash_header
 
 
+# cpuminer-opt-gr's GhostRider gate uses opt_target_factor=65536.0.
+# Keep pool/accounting difficulty in normal Bitcoin-style difficulty units,
+# but scale the value sent in mining.set_difficulty so GhostRider miners build
+# the same target that the pool verifies server-side.
+GHOSTRIDER_STRATUM_FACTOR = 65536.0
+
+
 def _fixed_hex(value, size):
     value = str(value).lower()
     if len(value) != size * 2 or any(c not in "0123456789abcdef" for c in value):
@@ -32,14 +39,22 @@ class StratumServer:
         self.jobs = jobs
         self.db = db
         self.payouts = payouts
+        # Logical/server-side share difficulty.
         self.difficulty = float(cfg["stratum"].get("difficulty", 0.000001))
+        self.stratum_factor = float(
+            cfg["stratum"].get("ghostrider_difficulty_factor", GHOSTRIDER_STRATUM_FACTOR)
+        )
+        self.advertised_difficulty = self.difficulty * self.stratum_factor
         self.pool_address = cfg["pool_address"]
 
     async def serve(self):
         host = self.cfg["stratum"].get("host", "0.0.0.0")
         port = int(self.cfg["stratum"].get("port", 3333))
         server = await asyncio.start_server(self._client, host, port)
-        logging.info("Stratum listening on %s:%s diff=%s", host, port, self.difficulty)
+        logging.info(
+            "Stratum listening on %s:%s share_diff=%s ghostrider_diff=%s factor=%s",
+            host, port, self.difficulty, self.advertised_difficulty, self.stratum_factor,
+        )
         async with server:
             await server.serve_forever()
 
@@ -105,7 +120,7 @@ class MinerSession:
                 "error": None,
             })
             await self.send({"id": None, "method": "mining.set_difficulty",
-                             "params": [self.pool.difficulty]})
+                             "params": [self.pool.advertised_difficulty]})
             await self.send_job(self.pool.jobs.snapshot(), True)
             return
 
@@ -214,6 +229,8 @@ class MinerSession:
         pow_hash = await asyncio.to_thread(hash_header, header)
         hash_value = int.from_bytes(pow_hash, "little")
 
+        # Verify against logical difficulty, not the 65536-scaled value sent to
+        # GhostRider miners in mining.set_difficulty.
         s_target = share_target(self.pool.difficulty)
         target_hex = tpl.get("target")
         network_target = int(target_hex, 16) if isinstance(target_hex, str) and target_hex else compact_target(tpl["bits"])
