@@ -5,6 +5,8 @@ This keeps the existing web.py routes/UI intact while overriding the summary,
 worker activity, and luck/hashrate calculations with values derived directly
 from the live production database and Yerbas wallet RPC.
 """
+import contextlib
+import sqlite3
 import time
 from http.server import ThreadingHTTPServer
 
@@ -16,12 +18,34 @@ ACTIVE_WINDOW = 600
 HASHRATE_WINDOW = 600
 
 
+@contextlib.contextmanager
+def _closed_db():
+    """Open the pool SQLite database and always close it after the request.
+
+    sqlite3.Connection's own context-manager commits/rolls back but does not
+    close the connection, which caused the dashboard to eventually exhaust
+    its file-descriptor limit under repeated API refreshes.
+    """
+    con = sqlite3.connect(base.DB_PATH)
+    con.row_factory = sqlite3.Row
+    try:
+        yield con
+    finally:
+        con.close()
+
+
+# All functions in web.py resolve db() through the module globals at request
+# time, so replacing it here fixes connection lifetime for the original API
+# routes as well as the live metric overrides below.
+base.db = _closed_db
+
+
 def _wallet_balance_atomic():
     """Return the actual pool wallet balance in atomic YERB units.
 
     Prefer getwalletinfo.balance and fall back to getbalance for older Yerbas
-    wallet RPC implementations.  Return None if the wallet RPC is unavailable
-    so the UI can fall back without breaking the rest of the dashboard.
+    wallet RPC implementations. Return None if wallet RPC is unavailable so
+    the UI can fall back without breaking the rest of the dashboard.
     """
     try:
         info = base.rpc_call("getwalletinfo")
@@ -79,8 +103,6 @@ def api_summary():
             "FROM payouts",
         )
 
-    # Keep the miners' mature liability available for diagnostics, but make
-    # the dashboard's Pool Balance the actual Yerbas wallet balance.
     accounts["miner_balance_atomic"] = int(accounts.get("balance_atomic") or 0)
     wallet_atomic = _wallet_balance_atomic()
     if wallet_atomic is not None:
@@ -196,9 +218,6 @@ def api_luck():
     }
 
 
-# Handler methods resolve these names in web.py's module globals at request
-# time, so replacing them here updates all existing API routes without
-# duplicating the site's routing/static-file code.
 base.api_summary = api_summary
 base.api_workers = api_workers
 base.api_luck = api_luck
