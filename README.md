@@ -1,14 +1,14 @@
 # YERB Pool
 
-A deliberately small Yerbas (YERB) GhostRider mining pool.
+A deliberately small standalone Yerbas (YERB) GhostRider mining pool.
 
 ## What works
 
 - Yerbas `getblocktemplate` polling
 - Standard Stratum TCP on port `3333`
-- Yerbas-Miner compatible `mining.subscribe`, `mining.authorize`, `mining.notify`, and `mining.submit`
+- `mining.subscribe`, `mining.authorize`, `mining.notify`, and `mining.submit`
 - Real GhostRider server-side share verification
-- Native GhostRider code reused from the verified Yerbas-Miner CPU reference implementation
+- Native GhostRider verifier built directly from pinned Yerbas Core sources
 - Yerbas DIP0003 CbTx coinbase construction
 - Required Smartnode, superblock, and founder payments from `getblocktemplate`
 - Coinbase extranonce1/extranonce2
@@ -22,7 +22,7 @@ A deliberately small Yerbas (YERB) GhostRider mining pool.
 ## Architecture
 
 ```text
-Yerbas-Miner / cpuminer
+GhostRider Stratum miner
         |
      Stratum :3333
         |
@@ -30,16 +30,12 @@ Yerbas-Miner / cpuminer
      |          |
  SQLite      libyerb_ghostrider
                 |
-          Yerbas-Miner reference
-                |
-            Yerbas Core GR
+          Yerbas Core GR
         |
    yerbasd JSON-RPC
 ```
 
-The native verifier is intentionally built from the same Yerbas GhostRider implementation used by
-`The-Yerbas-Endeavor/Yerbas-Miner`. That miner pins the Yerbas Core GhostRider sources, so the pool
-does not maintain a second independent implementation of consensus hashing.
+YERB-Pool does not depend on any miner repository. The native verifier is compiled directly from a pinned revision of `The-Yerbas-Endeavor/yerbas`, so consensus hashing comes from Yerbas Core itself.
 
 ## Ubuntu quick start
 
@@ -57,7 +53,7 @@ nano config.json
 python3 pool.py
 ```
 
-The first native build fetches the pinned Yerbas-Miner and Yerbas Core GhostRider sources.
+The first native build fetches the pinned Yerbas Core GhostRider sources.
 
 ## Configuration
 
@@ -80,8 +76,7 @@ The first native build fetches the pinned Yerbas-Miner and Yerbas Core GhostRide
 }
 ```
 
-`pool_address` is the address that receives the miner portion of the coinbase reward. Required
-Smartnode, superblock, and founder outputs are copied from the live Yerbas block template.
+`pool_address` receives the miner portion of the coinbase reward. Required Smartnode, superblock, and founder outputs are copied from the live Yerbas block template.
 
 ## Yerbas daemon
 
@@ -97,30 +92,9 @@ rpcallowip=127.0.0.1
 
 The daemon must be fully synced and connected to peers before `getblocktemplate` will return work.
 
-## Miner
+## Miner connection
 
-With Yerbas-Miner:
-
-```json
-{
-  "pool": {
-    "url": "stratum+tcp://POOL_HOST:3333",
-    "user": "YOUR_YERB_ADDRESS",
-    "password": "x"
-  },
-  "miner": {
-    "worker": "rig1"
-  }
-}
-```
-
-The resulting Stratum username is:
-
-```text
-YOUR_YERB_ADDRESS.rig1
-```
-
-A conventional GhostRider miner uses the same format:
+Use any compatible GhostRider Stratum miner with a wallet/worker username:
 
 ```bash
 cpuminer -a gr \
@@ -151,14 +125,11 @@ You can override the location:
 export YERB_GHOSTRIDER_LIB=/path/to/libyerb_ghostrider.so
 ```
 
-The pool refuses to start if the native GhostRider verifier is unavailable. It never credits
-unverified shares.
+The pool refuses to start if the native GhostRider verifier is unavailable. It never credits unverified shares.
 
 ## Coinbase details
 
-Yerbas mainnet has DIP0003 active. The pool therefore builds a transaction version `3`, type
-`TRANSACTION_COINBASE (5)`, preserves the `coinbase_payload` returned by `getblocktemplate`, and
-uses the coinbase scriptSig only for `OP_RETURN + extranonce1 + extranonce2`.
+Yerbas mainnet has DIP0003 active. The pool builds transaction version `3`, type `TRANSACTION_COINBASE (5)`, preserves the `coinbase_payload` returned by `getblocktemplate`, and uses the coinbase scriptSig for `OP_RETURN + extranonce1 + extranonce2`.
 
 Output order follows Yerbas Core block construction:
 
@@ -177,7 +148,7 @@ For every submitted share the pool:
 2. computes the coinbase transaction hash
 3. walks the template merkle branch
 4. serializes the exact 80-byte Yerbas header
-5. hashes it with real GhostRider
+5. hashes it with GhostRider
 6. compares the hash with the configured share target
 7. compares it with the template network target
 8. if it meets the network target, serializes the whole block and calls `submitblock`
@@ -186,6 +157,4 @@ BIP22 success from `submitblock` is JSON `null`.
 
 ## Current scope
 
-This is intentionally a simple pool. It does **not** yet automate mature-block payouts. Shares and
-block candidates are recorded in SQLite so proportional payout accounting can be added without
-changing the mining protocol.
+This is intentionally a simple pool. It does not yet automate mature-block payouts. Shares and block candidates are recorded in SQLite so proportional payout accounting can be added without changing the mining protocol.
