@@ -13,7 +13,8 @@
 <main id="app"></main>
 <script>
 const EXPLORER='https://explorer.yerbas.org';
-const coin=n=>(Number(n||0)/1e8).toFixed(8);
+const fmt=(n,digits=2)=>{const v=Number(n||0);return Number.isFinite(v)?v.toFixed(digits):(0).toFixed(digits)};
+const coin=n=>fmt(Number(n||0)/1e8,2);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const short=s=>{s=String(s||'');return s.length>22?s.slice(0,10)+'…'+s.slice(-10):s};
 const when=t=>t?new Date(Number(t)*1000).toLocaleString():'—';
