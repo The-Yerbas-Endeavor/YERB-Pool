@@ -6,7 +6,7 @@ from yerbpool.database import PoolDB
 class AccountingDB(PoolDB):
     """PoolDB with the round/block insert and payout locking operations used by v2."""
 
-    def record_block(self, worker, job_id, block_hash, height, reward_atomic, round_end_share_id, maturity_height):
+    def record_block(self, worker, job_id, block_hash, height, reward_atomic, network_reward_atomic, round_end_share_id, maturity_height):
         account_id, worker_id = self.get_or_create_worker(worker)
         now = int(time.time())
         with self.lock, self._connect() as db:
@@ -17,12 +17,12 @@ class AccountingDB(PoolDB):
             round_start = (int(prev) + 1) if prev is not None else 1
             db.execute(
                 """INSERT OR IGNORE INTO blocks(
-                    height,block_hash,job_id,finder_account_id,finder_worker_id,reward_atomic,status,
+                    height,block_hash,job_id,finder_account_id,finder_worker_id,reward_atomic,network_reward_atomic,status,
                     submitted_at,maturity_height,round_start_share_id,round_end_share_id
-                ) VALUES(?,?,?,?,?,?,'submitted',?,?,?,?)""",
+                ) VALUES(?,?,?,?,?,?,?,'submitted',?,?,?,?)""",
                 (
                     int(height), block_hash, job_id, account_id, worker_id,
-                    int(reward_atomic), now, int(maturity_height),
+                    int(reward_atomic), int(network_reward_atomic), now, int(maturity_height),
                     int(round_start), int(round_end_share_id),
                 ),
             )
