@@ -71,6 +71,11 @@ class PayoutManager:
             "Sending payout batch id=%s recipients=%s total=%.8f YERB",
             payout_id, len(items), total_atomic / COIN,
         )
+
+        # Lock these balances before talking to the wallet. If the RPC response
+        # is lost after broadcast, the batch becomes 'uncertain' and is never
+        # automatically paid a second time.
+        self.db.mark_payout_broadcasting(payout_id)
         try:
             txid = await asyncio.to_thread(
                 self.rpc.sendmany,
@@ -78,8 +83,11 @@ class PayoutManager:
                 f"YERB-Pool payout #{payout_id}",
             )
         except Exception as exc:
-            self.db.mark_payout_failed(payout_id, exc)
-            logging.exception("Payout batch %s failed", payout_id)
+            self.db.mark_payout_uncertain(payout_id, exc)
+            logging.exception(
+                "Payout batch %s has uncertain broadcast state; manual reconciliation required",
+                payout_id,
+            )
             return
 
         self.db.mark_payout_sent(payout_id, str(txid))
