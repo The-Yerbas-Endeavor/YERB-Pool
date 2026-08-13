@@ -2,7 +2,7 @@
 #include <cstdint>
 #include <cstring>
 
-#include "ghostrider/ghostrider.h"
+#include "ghostrider_reference.h"
 
 #if defined(_WIN32)
 #define YERB_EXPORT extern "C" __declspec(dllexport)
@@ -16,8 +16,7 @@ YERB_EXPORT int yerb_ghostrider_hash(const std::uint8_t* data,
 {
     if (data == nullptr || out32 == nullptr || size != 80) return 1;
     try {
-        const yerbas::ghostrider::Work work{data, size};
-        const auto hash = yerbas::ghostrider::hash_reference(work);
+        const auto hash = yerbpool::ghostrider::hash_reference(data, size);
         std::memcpy(out32, hash.data(), hash.size());
         return 0;
     } catch (...) {
