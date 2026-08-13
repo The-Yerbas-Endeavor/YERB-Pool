@@ -116,7 +116,7 @@ def api_summary():
 
 def api_blocks(status=None, limit=100):
     with db() as con:
-        sql = "SELECT id,height,block_hash,status,confirmations,reward_atomic,pool_fee_atomic,submitted_at,maturity_height FROM blocks"
+        sql = "SELECT id,height,block_hash,status,confirmations,reward_atomic,network_reward_atomic,pool_fee_atomic,submitted_at,maturity_height FROM blocks"
         params = []
         if status:
             if status == "pending":
