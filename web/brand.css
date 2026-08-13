@@ -1,0 +1,89 @@
+:root{
+  --yerb:#65c466;
+  --yerb-bright:#8ee889;
+  --yerb-deep:#173b24;
+  --yerb-surface:#141b16;
+  --yerb-border:#294332;
+}
+body{
+  background:
+    radial-gradient(circle at 12% -10%,rgba(101,196,102,.12),transparent 30rem),
+    radial-gradient(circle at 92% 8%,rgba(101,196,102,.06),transparent 26rem),
+    #101310;
+}
+header{
+  position:relative;
+  overflow:hidden;
+  background:linear-gradient(135deg,#131a14 0%,#181b18 52%,#111611 100%);
+  border-bottom:1px solid var(--yerb-border);
+  box-shadow:0 8px 32px rgba(0,0,0,.18);
+}
+header:after{
+  content:"YERB";
+  position:absolute;
+  right:-12px;
+  top:-42px;
+  font-size:150px;
+  line-height:1;
+  font-weight:900;
+  letter-spacing:-10px;
+  color:rgba(101,196,102,.025);
+  pointer-events:none;
+}
+.brand>div:first-child{position:relative;padding-left:60px}
+.brand>div:first-child:before{
+  content:"Y";
+  position:absolute;
+  left:0;
+  top:0;
+  display:grid;
+  place-items:center;
+  width:46px;
+  height:46px;
+  border-radius:50% 50% 48% 52%;
+  color:#0d140e;
+  font-weight:900;
+  font-size:25px;
+  background:linear-gradient(145deg,var(--yerb-bright),var(--yerb));
+  box-shadow:0 0 0 4px rgba(101,196,102,.10),0 8px 20px rgba(0,0,0,.28);
+  transform:rotate(-4deg);
+}
+.brand h1{margin:0 0 3px;font-size:30px;letter-spacing:-.8px}
+.brand h1 a{color:#f0f7f0!important;text-decoration:none}
+.brand h1 a:after{content:"  •  YERB";color:var(--yerb);font-size:12px;letter-spacing:1.8px;vertical-align:middle;margin-left:5px}
+.brand .muted{color:#9caf9d}
+nav a{padding:7px 9px;border-radius:7px;transition:.15s ease}
+nav a:hover{background:rgba(101,196,102,.10);color:var(--yerb-bright);text-decoration:none}
+a{color:#8edb91}
+.card,.chart-card,.metric,table,.empty{border-color:var(--yerb-border)!important}
+.card{background:linear-gradient(155deg,#1a201b,#171a17)}
+.card:hover{border-color:#497b55!important;box-shadow:0 7px 24px rgba(0,0,0,.20)}
+.value{color:#f0f7f0}
+section h2,section h3{letter-spacing:-.3px}
+section h2:before{content:"";display:inline-block;width:4px;height:.9em;border-radius:4px;background:var(--yerb);margin-right:9px;vertical-align:-.05em}
+.chart .line-main{stroke:var(--yerb)!important}
+.chart .bar-ok{fill:var(--yerb)!important}
+.dot.hashdot,.worker-bar-fill{background:var(--yerb)!important}
+.worker-bar-track{background:#1d2920}
+.ok{color:var(--yerb-bright)}
+.badge{border-color:#3a5140;background:#19201a}
+code{color:#cae9cb}
+.metric strong{color:#e9f7ea}
+main:after{
+  content:"YERB Pool • Powered by the Yerbas network • GhostRider";
+  display:block;
+  margin-top:48px;
+  padding:22px 0 8px;
+  border-top:1px solid var(--yerb-border);
+  color:#728875;
+  text-align:center;
+  font-size:12px;
+  letter-spacing:.35px;
+}
+@media(max-width:700px){
+  header:after{font-size:100px;top:-18px}
+  .brand>div:first-child{padding-left:52px}
+  .brand>div:first-child:before{width:40px;height:40px;font-size:22px}
+  .brand h1{font-size:25px}
+  .brand h1 a:after{display:none}
+}
