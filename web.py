@@ -18,6 +18,7 @@ if not DB_PATH.is_absolute():
 WEB_CFG = CFG.get("web", {})
 HOST = WEB_CFG.get("host", "127.0.0.1")
 PORT = int(WEB_CFG.get("port", 8080))
+GHOSTRIDER_TARGET_FACTOR = 65536.0
 
 
 def db():
@@ -80,10 +81,53 @@ def api_workers(limit=500):
             LEFT JOIN shares s ON s.worker_id=w.id
             GROUP BY w.id ORDER BY w.last_seen_at DESC LIMIT ?""", (now - window, min(max(int(limit), 1), 1000)))
     for item in result:
-        # Standard Stratum difficulty work estimate over a 10 minute window.
-        item["hashrate"] = float(item.get("recent_diff") or 0) * 4294967296.0 / window
+        # GhostRider cpuminer uses target difficulty D/65536.
+        item["hashrate"] = (float(item.get("recent_diff") or 0) / GHOSTRIDER_TARGET_FACTOR) * 4294967296.0 / window
         item["active"] = int(item.get("last_seen_at") or 0) >= now - window
     return result
+
+
+def api_worker_stats(worker_id, hours=24, bucket_seconds=300):
+    worker_id = int(worker_id)
+    hours = min(max(int(hours), 1), 168)
+    bucket_seconds = min(max(int(bucket_seconds), 60), 3600)
+    now = int(time.time())
+    end = (now // bucket_seconds) * bucket_seconds
+    start = end - hours * 3600
+
+    with db() as con:
+        worker = one(con, """SELECT w.id,a.address,w.name,w.created_at,w.last_seen_at,
+            w.accepted_shares,w.rejected_shares
+            FROM workers w JOIN accounts a ON a.id=w.account_id WHERE w.id=?""", (worker_id,))
+        if not worker:
+            return None
+        raw = rows(con, """SELECT (s.ts / ?) * ? bucket,
+            COALESCE(SUM(CASE WHEN s.accepted=1 THEN s.difficulty ELSE 0 END),0) accepted_diff,
+            COALESCE(SUM(CASE WHEN s.accepted=1 THEN 1 ELSE 0 END),0) accepted,
+            COALESCE(SUM(CASE WHEN s.accepted=0 THEN 1 ELSE 0 END),0) rejected
+            FROM shares s WHERE s.worker_id=? AND s.ts>=? AND s.ts<?
+            GROUP BY bucket ORDER BY bucket""",
+            (bucket_seconds, bucket_seconds, worker_id, start, end + bucket_seconds))
+
+    by_bucket = {int(r["bucket"]): r for r in raw}
+    history = []
+    t = start
+    while t <= end:
+        r = by_bucket.get(t, {})
+        accepted_diff = float(r.get("accepted_diff") or 0)
+        history.append({
+            "ts": t,
+            "hashrate": (accepted_diff / GHOSTRIDER_TARGET_FACTOR) * 4294967296.0 / bucket_seconds,
+            "accepted": int(r.get("accepted") or 0),
+            "rejected": int(r.get("rejected") or 0),
+        })
+        t += bucket_seconds
+
+    worker["active"] = int(worker.get("last_seen_at") or 0) >= now - 600
+    worker["hours"] = hours
+    worker["bucket_seconds"] = bucket_seconds
+    worker["history"] = history
+    return worker
 
 
 def api_shares(status=None, address=None, limit=250):
@@ -154,6 +198,10 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/blocks": return self.send_json(api_blocks((query.get("status") or [None])[0], (query.get("limit") or [100])[0]))
             if path == "/api/miners": return self.send_json(api_miners((query.get("limit") or [250])[0]))
             if path == "/api/workers": return self.send_json(api_workers((query.get("limit") or [500])[0]))
+            if path.startswith("/api/worker/") and path.endswith("/stats"):
+                worker_id = unquote(path[len("/api/worker/"):-len("/stats")]).strip("/")
+                stats = api_worker_stats(worker_id, (query.get("hours") or [24])[0], (query.get("bucket") or [300])[0])
+                return self.send_json(stats if stats is not None else {"error": "worker not found"}, 200 if stats is not None else 404)
             if path == "/api/shares": return self.send_json(api_shares((query.get("status") or [None])[0], (query.get("address") or [None])[0], (query.get("limit") or [250])[0]))
             if path.startswith("/api/account/"):
                 account = api_account(unquote(path[len("/api/account/"):]))
@@ -161,7 +209,7 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/payouts": return self.send_json(api_payouts((query.get("limit") or [100])[0]))
             if path == "/api/health": return self.send_json({"ok": True})
 
-            if path in FRONTEND_ROUTES or path.startswith("/account/"):
+            if path in FRONTEND_ROUTES or path.startswith("/account/") or path.startswith("/worker/"):
                 return self.serve_file(WEB_ROOT / "index.html")
 
             target = (WEB_ROOT / path.lstrip("/")).resolve()
