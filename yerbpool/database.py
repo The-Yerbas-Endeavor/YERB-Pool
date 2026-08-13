@@ -4,7 +4,7 @@ import time
 from decimal import Decimal, ROUND_DOWN
 
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 COIN = 100_000_000
 
 
@@ -74,6 +74,7 @@ class PoolDB:
                 finder_account_id INTEGER,
                 finder_worker_id INTEGER,
                 reward_atomic INTEGER NOT NULL DEFAULT 0,
+                network_reward_atomic INTEGER NOT NULL DEFAULT 0,
                 pool_fee_atomic INTEGER NOT NULL DEFAULT 0,
                 status TEXT NOT NULL DEFAULT 'submitted',
                 submitted_at INTEGER NOT NULL,
@@ -141,6 +142,7 @@ class PoolDB:
     def _migrate(self, db):
         self._ensure_column(db, "shares", "account_id", "INTEGER")
         self._ensure_column(db, "shares", "worker_id", "INTEGER")
+        self._ensure_column(db, "blocks", "network_reward_atomic", "INTEGER NOT NULL DEFAULT 0")
         self._ensure_column(db, "blocks", "pool_fee_atomic", "INTEGER NOT NULL DEFAULT 0")
         self._ensure_column(db, "blocks", "credited_at", "INTEGER")
         self._ensure_column(db, "blocks", "round_start_share_id", "INTEGER")
@@ -181,7 +183,7 @@ class PoolDB:
             db.execute(f"UPDATE workers SET {counter}={counter}+1,last_seen_at=? WHERE id=?", (now, worker_id))
             return int(cur.lastrowid)
 
-    def record_block(self, worker, job_id, block_hash, height, reward_atomic, round_end_share_id, maturity_height):
+    def record_block(self, worker, job_id, block_hash, height, reward_atomic, network_reward_atomic, round_end_share_id, maturity_height):
         account_id, worker_id = self.get_or_create_worker(worker)
         now = int(time.time())
         with self.lock, self._connect() as db:
@@ -191,10 +193,10 @@ class PoolDB:
             round_start = (int(prev) + 1) if prev is not None else 1
             db.execute(
                 """INSERT OR IGNORE INTO blocks(
-                    height,block_hash,job_id,finder_account_id,finder_worker_id,reward_atomic,status,
+                    height,block_hash,job_id,finder_account_id,finder_worker_id,reward_atomic,network_reward_atomic,status,
                     submitted_at,maturity_height,round_start_share_id,round_end_share_id
-                ) VALUES(?,?,?,?,?,?,'submitted',?,?,?,?,?)""",
-                (height, block_hash, job_id, account_id, worker_id, int(reward_atomic), now,
+                ) VALUES(?,?,?,?,?,?,?,'submitted',?,?,?,?,?)""",
+                (height, block_hash, job_id, account_id, worker_id, int(reward_atomic), int(network_reward_atomic), now,
                  int(maturity_height), round_start, int(round_end_share_id)),
             )
             row = db.execute("SELECT id FROM blocks WHERE block_hash=?", (block_hash,)).fetchone()
@@ -254,12 +256,17 @@ class PoolDB:
                 "SELECT * FROM blocks WHERE status IN ('submitted','confirmed') ORDER BY height"
             ).fetchall()]
 
-    def update_block_confirmations(self, block_id, confirmations):
+    def update_block_confirmations(self, block_id, confirmations, maturity_confirmations=100):
         now = int(time.time())
-        status = "confirmed" if confirmations > 0 else "submitted"
+        confirmations = int(confirmations)
+        maturity_confirmations = max(1, int(maturity_confirmations))
+        status = "confirmed" if confirmations >= maturity_confirmations else "submitted"
+        confirmed_at = now if status == "confirmed" else None
         with self.lock, self._connect() as db:
-            db.execute("UPDATE blocks SET confirmations=?,status=?,confirmed_at=COALESCE(confirmed_at,?) WHERE id=?",
-                       (int(confirmations), status, now if confirmations > 0 else None, int(block_id)))
+            db.execute(
+                "UPDATE blocks SET confirmations=?,status=?,confirmed_at=CASE WHEN ? IS NOT NULL THEN COALESCE(confirmed_at,?) ELSE NULL END WHERE id=?",
+                (confirmations, status, confirmed_at, confirmed_at, int(block_id)),
+            )
 
     def mature_block(self, block_id):
         now = int(time.time())
