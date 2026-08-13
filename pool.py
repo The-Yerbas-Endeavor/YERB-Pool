@@ -2,8 +2,8 @@
 import asyncio
 import logging
 
+from yerbpool.accounting import AccountingDB
 from yerbpool.config import load_config
-from yerbpool.database import PoolDB
 from yerbpool.ghostrider import ensure_available
 from yerbpool.jobs import JobManager
 from yerbpool.payouts import PayoutManager
@@ -19,7 +19,7 @@ async def main():
     )
     ensure_available()
     logging.info("Native Yerbas GhostRider backend loaded")
-    db = PoolDB(cfg["database"])
+    db = AccountingDB(cfg["database"])
     rpc = YerbasRPC(cfg["rpc"])
     jobs = JobManager(rpc, cfg)
     payouts = PayoutManager(cfg, rpc, db)
