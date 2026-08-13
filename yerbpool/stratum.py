@@ -305,9 +305,10 @@ class MinerSession:
             block_hash = sha256d(header)[::-1].hex()
             height = int(tpl.get("height", 0))
             pool_reward = int(template_outputs(tpl, self.pool.pool_address)[0][0])
+            network_reward = int(tpl.get("coinbasevalue", pool_reward))
             maturity = int(self.pool.cfg.get("payouts", {}).get("coinbase_maturity", 100))
             block_id = self.pool.db.record_block(
-                self.worker, job_id, block_hash, height, pool_reward,
+                self.worker, job_id, block_hash, height, pool_reward, network_reward,
                 share_id, height + maturity,
             )
             pool_fee = float(self.pool.cfg.get("payouts", {}).get("pool_fee_percent", 0.0))
