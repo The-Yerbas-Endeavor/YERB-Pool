@@ -11,6 +11,13 @@
     return labels[type] || type || '';
   }
 
+  function removeShareSummaryCards() {
+    document.querySelectorAll('main#app .card').forEach(card=>{
+      const label=card.querySelector('.muted')?.textContent?.trim();
+      if(label==='Accepted Shares' || label==='Rejected Shares') card.remove();
+    });
+  }
+
   // Keep the accounting values untouched; only clarify what each number means.
   window.renderBlocks = function(b){
     if(!b.length) return '<div class="empty">No blocks found yet.</div>';
@@ -35,6 +42,7 @@
   const originalDashboard = window.dashboard;
   window.dashboard = async function(){
     await originalDashboard();
+    removeShareSummaryCards();
     const blocks = await get('/api/blocks?limit=10').catch(()=>[]);
     const summary = await get('/api/summary').catch(()=>null);
     const main=document.querySelector('main#app');
@@ -60,13 +68,11 @@
     const x=await get('/api/account/'+encodeURIComponent(a)).catch(()=>null);
     if(!x) return;
 
-    // Relabel account summary cards.
     document.querySelectorAll('.card .muted').forEach(el=>{
       if(el.textContent.trim()==='Balance') el.textContent='Mature Balance';
       if(el.textContent.trim()==='Immature' || el.textContent.trim()==='Immature Balance') el.textContent='Immature Balance';
     });
 
-    // Replace internal ledger terms and generic notes with clear miner-facing language.
     const ledgerHeading=[...document.querySelectorAll('h2')].find(h=>h.textContent.trim()==='Ledger');
     if(!ledgerHeading) return;
     const section=ledgerHeading.closest('section');
@@ -92,7 +98,6 @@
     section.innerHTML='<h2>Ledger</h2>'+body;
   };
 
-  // Re-render the current route once so the clearer labels apply immediately.
   if(location.pathname==='/') window.dashboard();
   else if(location.pathname==='/miners') window.miners();
   else if(location.pathname==='/blocks' || location.pathname==='/blocks/pending') window.blocks();
