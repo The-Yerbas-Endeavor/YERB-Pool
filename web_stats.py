@@ -6,6 +6,7 @@ worker activity, and luck/hashrate calculations with values derived directly
 from the live production database and Yerbas wallet RPC.
 """
 import contextlib
+import mimetypes
 import sqlite3
 import time
 from http.server import ThreadingHTTPServer
@@ -223,6 +224,37 @@ base.api_workers = api_workers
 base.api_luck = api_luck
 
 
+class LiveHandler(base.Handler):
+    """Serve the existing dashboard with clearer miner balance labels."""
+
+    def serve_file(self, target):
+        if target == base.WEB_ROOT / "index.html":
+            text = target.read_text()
+            text = text.replace(
+                "['Address','Workers','Accepted','Rejected','Balance','Immature','Total Paid']",
+                "['Address','Workers','Accepted','Rejected','Balance','Immature Balance','Total Paid']",
+            )
+            text = text.replace(
+                '<div class="muted">Immature</div>',
+                '<div class="muted">Immature Balance</div>',
+            )
+            text = text.replace(
+                "</head>",
+                '<link rel="stylesheet" href="/brand.css?v=1"></head>',
+            )
+            body = text.replace("</body>", base.LUCK_SCRIPT + "</body>").encode()
+        else:
+            body = target.read_bytes()
+        self.send_response(200)
+        self.send_header(
+            "Content-Type",
+            mimetypes.guess_type(target.name)[0] or "application/octet-stream",
+        )
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+
 if __name__ == "__main__":
     print(f"YERB Pool web listening on http://{base.HOST}:{base.PORT} (live metrics)")
-    ThreadingHTTPServer((base.HOST, base.PORT), base.Handler).serve_forever()
+    ThreadingHTTPServer((base.HOST, base.PORT), LiveHandler).serve_forever()
