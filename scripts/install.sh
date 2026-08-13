@@ -15,7 +15,7 @@ SERVICE_USER=yerbpool
 
 echo "Installing YERB Pool dependencies..."
 $SUDO apt-get update
-$SUDO apt-get install -y build-essential cmake git python3 sqlite3 libboost-dev nginx
+$SUDO apt-get install -y build-essential cmake git python3 sqlite3 libboost-dev nginx rsync
 
 if ! id "$SERVICE_USER" >/dev/null 2>&1; then
     $SUDO useradd --system --home "$INSTALL_DIR" --shell /usr/sbin/nologin "$SERVICE_USER"
