@@ -58,8 +58,9 @@ if [[ ! -f "$INSTALL_DIR/config.json" ]]; then
     fi
 fi
 
-# Migrate only the original testing default. Do not touch any other user
-# settings or a deliberately customized difficulty.
+# Migrate only the known invalid early GhostRider testing defaults. GhostRider
+# miners use a 65536 target factor, so 1e-05/1e-06 are below a useful target
+# range and result in miners receiving work but never submitting shares.
 $SUDO python3 - "$INSTALL_DIR/config.json" <<'PY'
 import json
 import sys
@@ -67,11 +68,11 @@ from pathlib import Path
 p = Path(sys.argv[1])
 cfg = json.loads(p.read_text())
 stratum = cfg.setdefault("stratum", {})
-old = float(stratum.get("difficulty", 0.000001))
-if abs(old - 0.00001) < 1e-15:
-    stratum["difficulty"] = 0.000001
+old = float(stratum.get("difficulty", 0.05))
+if abs(old - 0.00001) < 1e-15 or abs(old - 0.000001) < 1e-15:
+    stratum["difficulty"] = 0.05
     p.write_text(json.dumps(cfg, indent=2) + "\n")
-    print("Migrated Stratum test difficulty: 1e-05 -> 1e-06")
+    print(f"Migrated invalid GhostRider Stratum difficulty: {old:g} -> 0.05")
 else:
     print(f"Keeping configured Stratum difficulty: {old:g}")
 PY
