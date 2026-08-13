@@ -32,7 +32,7 @@ class StratumServer:
         self.jobs = jobs
         self.db = db
         self.payouts = payouts
-        self.difficulty = float(cfg["stratum"].get("difficulty", 0.00001))
+        self.difficulty = float(cfg["stratum"].get("difficulty", 0.000001))
         self.pool_address = cfg["pool_address"]
 
     async def serve(self):
@@ -48,10 +48,15 @@ class StratumServer:
         self.jobs.register(session.send_job)
         try:
             await session.run()
+        except (ConnectionResetError, BrokenPipeError, asyncio.IncompleteReadError):
+            logging.info("Miner disconnected")
         finally:
             self.jobs.unregister(session.send_job)
             writer.close()
-            await writer.wait_closed()
+            try:
+                await writer.wait_closed()
+            except (ConnectionResetError, BrokenPipeError):
+                pass
 
 
 class MinerSession:
@@ -211,42 +216,35 @@ class MinerSession:
             return
 
         is_block = hash_value <= network_target
-        share_id = self.pool.db.add_share(
-            self.worker, job_id, self.pool.difficulty, True,
-            is_block, pow_hash[::-1].hex(),
-        )
+        share_id = self.pool.db.add_share(self.worker, job_id, self.pool.difficulty, True,
+                                          is_block, pow_hash[::-1].hex())
 
         if is_block:
             raw_block = block_bytes(header, coinbase, tpl)
             result = await asyncio.to_thread(self.pool.rpc.submitblock, raw_block.hex())
             if result is not None:
-                logging.error("submitblock rejected candidate job=%s result=%r", job_id, result)
+                logging.error("submitblock rejected candidate job=%s result=%r",
+                              job_id, result)
                 await self.send({"id": rid, "result": False,
                                  "error": [20, f"submitblock: {result}", None]})
                 return
 
             block_hash = sha256d(header)[::-1].hex()
             height = int(tpl.get("height", 0))
-            reward_atomic = int(template_outputs(tpl, self.pool.pool_address)[0][0])
+            pool_reward = int(template_outputs(tpl, self.pool.pool_address)[0][0])
             maturity = int(self.pool.cfg.get("payouts", {}).get("coinbase_maturity", 100))
             block_id = self.pool.db.record_block(
-                self.worker,
-                job_id,
-                block_hash,
-                height,
-                reward_atomic,
-                share_id,
-                height + maturity,
+                self.worker, job_id, block_hash, height, pool_reward,
+                share_id, height + maturity,
             )
-            fee_percent = float(self.pool.cfg.get("payouts", {}).get("pool_fee_percent", 0.0))
-            self.pool.db.allocate_block_immature(block_id, fee_percent)
+            pool_fee = float(self.pool.cfg.get("payouts", {}).get("pool_fee_percent", 0.0))
+            self.pool.db.allocate_block_immature(block_id, pool_fee)
 
-            logging.warning(
-                "BLOCK ACCEPTED worker=%s job=%s height=%s hash=%s pow=%s reward=%.8f",
-                self.worker, job_id, height, block_hash, pow_hash[::-1].hex(),
-                reward_atomic / 100_000_000,
-            )
+            logging.warning("BLOCK ACCEPTED worker=%s job=%s hash=%s",
+                            self.worker, job_id, block_hash)
             try:
+                await self.pool.jobs.refresh(force=True)
+            except TypeError:
                 await self.pool.jobs.refresh()
             except Exception:
                 logging.exception("Failed to refresh after accepted block")
