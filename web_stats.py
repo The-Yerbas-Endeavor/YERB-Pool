@@ -2,8 +2,8 @@
 """YERB Pool dashboard runtime with live production metrics.
 
 This keeps the existing web.py routes/UI intact while overriding the summary,
-worker activity, and luck/hashrate calculations with values derived directly
-from the live production database and Yerbas wallet RPC.
+worker activity, luck/hashrate, and share API calculations with values derived
+directly from the live production database and Yerbas wallet RPC.
 """
 import contextlib
 import mimetypes
@@ -185,9 +185,35 @@ def api_luck():
     }
 
 
+def api_shares(status=None, address=None, limit=250):
+    """Return shares with the persisted Stratum rejection reason when present."""
+    clauses = []
+    params = []
+    if status == "accepted":
+        clauses.append("s.accepted=1")
+    elif status == "rejected":
+        clauses.append("s.accepted=0")
+    if address:
+        clauses.append("a.address=?")
+        params.append(address)
+
+    with base.db() as con:
+        columns = {row[1] for row in con.execute("PRAGMA table_info(shares)")}
+        reason_expr = "s.rejection_reason" if "rejection_reason" in columns else "NULL AS rejection_reason"
+        sql = f"""SELECT s.id,s.ts,s.worker,s.worker_id,s.job_id,s.difficulty,s.accepted,
+                         s.block_candidate,s.hash,{reason_expr},a.address
+                  FROM shares s LEFT JOIN accounts a ON a.id=s.account_id"""
+        if clauses:
+            sql += " WHERE " + " AND ".join(clauses)
+        sql += " ORDER BY s.id DESC LIMIT ?"
+        params.append(min(max(int(limit), 1), 1000))
+        return base.rows(con, sql, params)
+
+
 base.api_summary = api_summary
 base.api_workers = api_workers
 base.api_luck = api_luck
+base.api_shares = api_shares
 
 
 class LiveHandler(base.Handler):
@@ -214,7 +240,7 @@ class LiveHandler(base.Handler):
             )
             body = text.replace(
                 "</body>",
-                base.LUCK_SCRIPT + '<script src="/reward_labels.js?v=1"></script></body>',
+                base.LUCK_SCRIPT + '<script src="/reward_labels.js?v=2"></script></body>',
             ).encode()
         else:
             body = target.read_bytes()
