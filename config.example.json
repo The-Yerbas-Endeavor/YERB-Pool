@@ -7,7 +7,16 @@
   "stratum": {
     "host": "0.0.0.0",
     "port": 3333,
-    "difficulty": 0.05
+    "difficulty": 0.05,
+    "vardiff": {
+      "enabled": true,
+      "min_difficulty": 0.05,
+      "max_difficulty": 65536.0,
+      "target_share_seconds": 12,
+      "retarget_seconds": 60,
+      "variance_percent": 30,
+      "max_step_factor": 2.0
+    }
   },
   "payouts": {
     "enabled": true,
