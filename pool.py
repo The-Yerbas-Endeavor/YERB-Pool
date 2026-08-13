@@ -5,8 +5,9 @@ import logging
 from yerbpool.config import load_config
 from yerbpool.database import PoolDB
 from yerbpool.ghostrider import ensure_available
-from yerbpool.rpc import YerbasRPC
 from yerbpool.jobs import JobManager
+from yerbpool.payouts import PayoutManager
+from yerbpool.rpc import YerbasRPC
 from yerbpool.stratum import StratumServer
 
 
@@ -21,8 +22,10 @@ async def main():
     db = PoolDB(cfg["database"])
     rpc = YerbasRPC(cfg["rpc"])
     jobs = JobManager(rpc, cfg)
-    server = StratumServer(cfg, rpc, jobs, db)
+    payouts = PayoutManager(cfg, rpc, db)
+    server = StratumServer(cfg, rpc, jobs, db, payouts)
     await jobs.start()
+    await payouts.start()
     await server.serve()
 
 
