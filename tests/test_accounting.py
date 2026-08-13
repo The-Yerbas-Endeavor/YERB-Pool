@@ -25,7 +25,7 @@ class AccountingTest(unittest.TestCase):
 
         block_id = self.db.record_block(
             "yMinerB.rig", "job1", "00" * 32, 1000,
-            500_000_000, s3, 1100,
+            500_000_000, 8_000_000_000, s3, 1100,
         )
         self.db.allocate_block_immature(block_id, 0.0)
 
@@ -35,7 +35,14 @@ class AccountingTest(unittest.TestCase):
         self.assertEqual(b["immature_balance_atomic"], 400_000_000)
         self.assertEqual(a["balance_atomic"], 0)
 
-        self.db.update_block_confirmations(block_id, 100)
+        self.db.update_block_confirmations(block_id, 99, 100)
+        with self.db._connect() as con:
+            self.assertEqual(con.execute("SELECT status FROM blocks WHERE id=?", (block_id,)).fetchone()[0], "submitted")
+
+        self.db.update_block_confirmations(block_id, 100, 100)
+        with self.db._connect() as con:
+            self.assertEqual(con.execute("SELECT status FROM blocks WHERE id=?", (block_id,)).fetchone()[0], "confirmed")
+
         self.assertTrue(self.db.mature_block(block_id))
         a = self.db.account_balance("yMinerA")
         b = self.db.account_balance("yMinerB")
