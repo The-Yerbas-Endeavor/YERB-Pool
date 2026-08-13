@@ -21,8 +21,6 @@ if ! id "$SERVICE_USER" >/dev/null 2>&1; then
     $SUDO useradd --system --home "$INSTALL_DIR" --shell /usr/sbin/nologin "$SERVICE_USER"
 fi
 
-# Create a source config for first install only. Existing production config in
-# /opt/yerb-pool is never overwritten by subsequent installer runs.
 if [[ ! -f config.json && ! -f "$INSTALL_DIR/config.json" ]]; then
     cp config.example.json config.json
     echo "Created config.json from config.example.json"
@@ -34,7 +32,6 @@ echo "Building native GhostRider verifier..."
 echo "Installing pool to $INSTALL_DIR..."
 $SUDO mkdir -p "$INSTALL_DIR"
 
-# Never overwrite live accounting/configuration during an upgrade.
 $SUDO rsync -a --delete \
   --exclude '.git/' \
   --exclude 'config.json' \
@@ -49,7 +46,6 @@ if [[ -f "$ROOT/native/build/libyerb_ghostrider.so" ]]; then
     $SUDO cp "$ROOT/native/build/libyerb_ghostrider.so" "$INSTALL_DIR/native/build/"
 fi
 
-# First install: copy the configured source file. Upgrades: keep live config.
 if [[ ! -f "$INSTALL_DIR/config.json" ]]; then
     if [[ -f "$ROOT/config.json" ]]; then
         $SUDO cp "$ROOT/config.json" "$INSTALL_DIR/config.json"
@@ -58,7 +54,8 @@ if [[ ! -f "$INSTALL_DIR/config.json" ]]; then
     fi
 fi
 
-# Migrate only the known invalid early GhostRider testing defaults.
+# Preserve existing settings, repair obsolete GhostRider test difficulty values,
+# and add safe VarDiff defaults to older installs that predate VarDiff.
 $SUDO python3 - "$INSTALL_DIR/config.json" <<'PY'
 import json
 import sys
@@ -67,12 +64,35 @@ p = Path(sys.argv[1])
 cfg = json.loads(p.read_text())
 stratum = cfg.setdefault("stratum", {})
 old = float(stratum.get("difficulty", 0.05))
+changed = False
 if abs(old - 0.00001) < 1e-15 or abs(old - 0.000001) < 1e-15:
     stratum["difficulty"] = 0.05
-    p.write_text(json.dumps(cfg, indent=2) + "\n")
-    print(f"Migrated invalid GhostRider Stratum difficulty: {old:g} -> 0.05")
+    old = 0.05
+    changed = True
+    print("Migrated invalid GhostRider Stratum difficulty -> 0.05")
 else:
     print(f"Keeping configured Stratum difficulty: {old:g}")
+
+vardiff = stratum.setdefault("vardiff", {})
+def default(key, value):
+    global changed
+    if key not in vardiff:
+        vardiff[key] = value
+        changed = True
+
+default("enabled", True)
+default("min_difficulty", max(0.05, min(old, 0.05)))
+default("max_difficulty", 65536.0)
+default("target_share_seconds", 12)
+default("retarget_seconds", 60)
+default("variance_percent", 30)
+default("max_step_factor", 2.0)
+
+if changed:
+    p.write_text(json.dumps(cfg, indent=2) + "\n")
+    print("Added/updated GhostRider VarDiff configuration")
+else:
+    print("Keeping existing GhostRider VarDiff configuration")
 PY
 
 $SUDO chown -R "$SERVICE_USER:$SERVICE_USER" "$INSTALL_DIR"
@@ -115,7 +135,6 @@ if command -v ufw >/dev/null 2>&1; then
     $SUDO ufw allow 3333/tcp >/dev/null || true
 fi
 
-# Stop any stale manually launched checkout copy before binding production port.
 pkill -f "$ROOT/pool.py" 2>/dev/null || true
 
 $SUDO systemctl restart yerb-pool-web
@@ -214,8 +233,6 @@ EOF
     fi
 }
 
-# Interactive installs get the optional domain/HTTPS wizard. Automated installs
-# remain non-interactive and keep the default IP-based Nginx configuration.
 if [[ -t 0 ]]; then
     configure_domain_https
 else
