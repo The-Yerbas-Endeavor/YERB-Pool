@@ -72,8 +72,27 @@ target_include_directories(yerb_ghostrider PRIVATE
     ${YERBAS_CORE_SRC}
 )
 
-# Do not force Yerbas Core's legacy compat/endian.h on modern Linux/glibc.
-# glibc already provides htole*/be* helpers; forcing both causes redefinitions
-# with GCC 15 / Ubuntu 26.
+# Yerbas Core normally gets these HAVE_DECL_* values from its Autoconf-generated
+# configuration header. YERB-Pool compiles only the GhostRider sources directly,
+# so provide the declarations explicitly on Linux where glibc already supplies
+# these endian helpers. Without these definitions compat/endian.h treats every
+# helper as missing and redefines htole*/htobe*/le*toh/be*toh under GCC 15.
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    target_compile_definitions(yerb_ghostrider PRIVATE
+        HAVE_ENDIAN_H=1
+        HAVE_DECL_HTOBE16=1
+        HAVE_DECL_HTOLE16=1
+        HAVE_DECL_BE16TOH=1
+        HAVE_DECL_LE16TOH=1
+        HAVE_DECL_HTOBE32=1
+        HAVE_DECL_HTOLE32=1
+        HAVE_DECL_BE32TOH=1
+        HAVE_DECL_LE32TOH=1
+        HAVE_DECL_HTOBE64=1
+        HAVE_DECL_HTOLE64=1
+        HAVE_DECL_BE64TOH=1
+        HAVE_DECL_LE64TOH=1
+    )
+endif()
 
 set_target_properties(yerb_ghostrider PROPERTIES OUTPUT_NAME "yerb_ghostrider")
