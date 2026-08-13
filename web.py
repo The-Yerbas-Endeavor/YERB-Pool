@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
+import base64
 import json
+import math
 import mimetypes
 import sqlite3
 import time
+import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
@@ -19,6 +22,7 @@ WEB_CFG = CFG.get("web", {})
 HOST = WEB_CFG.get("host", "127.0.0.1")
 PORT = int(WEB_CFG.get("port", 8080))
 GHOSTRIDER_TARGET_FACTOR = 65536.0
+DIFF1_HASHES = 4294967296.0
 
 
 def db():
@@ -34,6 +38,70 @@ def one(con, sql, params=()):
 
 def rows(con, sql, params=()):
     return [dict(r) for r in con.execute(sql, params).fetchall()]
+
+
+def rpc_call(method, params=None):
+    cfg = CFG.get("rpc", {})
+    payload = json.dumps({"jsonrpc": "1.0", "id": "yerbpool-web", "method": method, "params": params or []}).encode()
+    token = base64.b64encode(f"{cfg.get('user', '')}:{cfg.get('password', '')}".encode()).decode()
+    req = urllib.request.Request(
+        cfg.get("url", "http://127.0.0.1:15419"),
+        data=payload,
+        headers={"Content-Type": "application/json", "Authorization": f"Basic {token}"},
+    )
+    with urllib.request.urlopen(req, timeout=3) as response:
+        result = json.loads(response.read().decode())
+    if result.get("error"):
+        raise RuntimeError(str(result["error"]))
+    return result.get("result")
+
+
+def current_network_difficulty():
+    try:
+        info = rpc_call("getmininginfo")
+        if isinstance(info, dict) and info.get("difficulty") is not None:
+            return float(info["difficulty"])
+    except Exception:
+        pass
+    return float(rpc_call("getdifficulty"))
+
+
+def api_luck():
+    now = int(time.time())
+    window = 600
+    with db() as con:
+        recent = one(con, """SELECT COALESCE(SUM(difficulty),0) accepted_diff
+            FROM shares WHERE accepted=1 AND ts>=?""", (now - window,))
+        last_block = one(con, "SELECT height,submitted_at FROM blocks ORDER BY id DESC LIMIT 1")
+        if last_block and last_block.get("submitted_at"):
+            round_start = int(last_block["submitted_at"])
+        else:
+            first = one(con, "SELECT MIN(ts) first_ts FROM shares WHERE accepted=1")
+            round_start = int(first.get("first_ts") or now)
+        round_stats = one(con, """SELECT COUNT(*) accepted_shares, COALESCE(SUM(difficulty),0) accepted_diff
+            FROM shares WHERE accepted=1 AND ts>?""", (round_start,))
+
+    recent_diff = float(recent.get("accepted_diff") or 0)
+    pool_hashrate = (recent_diff / GHOSTRIDER_TARGET_FACTOR) * DIFF1_HASHES / window
+    network_diff = current_network_difficulty()
+    expected_stratum_diff = max(network_diff * GHOSTRIDER_TARGET_FACTOR, 1e-30)
+    round_diff = float(round_stats.get("accepted_diff") or 0)
+    effort_ratio = round_diff / expected_stratum_diff
+    chance = (1.0 - math.exp(-effort_ratio)) * 100.0
+    eta_seconds = (network_diff * DIFF1_HASHES / pool_hashrate) if pool_hashrate > 0 else None
+
+    return {
+        "pool_hashrate": pool_hashrate,
+        "network_difficulty": network_diff,
+        "eta_seconds": eta_seconds,
+        "round_start": round_start,
+        "round_seconds": max(0, now - round_start),
+        "round_accepted_shares": int(round_stats.get("accepted_shares") or 0),
+        "round_stratum_difficulty": round_diff,
+        "round_effort_percent": effort_ratio * 100.0,
+        "chance_percent": chance,
+        "last_block_height": last_block.get("height") if last_block else None,
+    }
 
 
 def api_summary():
@@ -81,8 +149,7 @@ def api_workers(limit=500):
             LEFT JOIN shares s ON s.worker_id=w.id
             GROUP BY w.id ORDER BY w.last_seen_at DESC LIMIT ?""", (now - window, min(max(int(limit), 1), 1000)))
     for item in result:
-        # GhostRider cpuminer uses target difficulty D/65536.
-        item["hashrate"] = (float(item.get("recent_diff") or 0) / GHOSTRIDER_TARGET_FACTOR) * 4294967296.0 / window
+        item["hashrate"] = (float(item.get("recent_diff") or 0) / GHOSTRIDER_TARGET_FACTOR) * DIFF1_HASHES / window
         item["active"] = int(item.get("last_seen_at") or 0) >= now - window
     return result
 
@@ -117,7 +184,7 @@ def api_worker_stats(worker_id, hours=24, bucket_seconds=300):
         accepted_diff = float(r.get("accepted_diff") or 0)
         history.append({
             "ts": t,
-            "hashrate": (accepted_diff / GHOSTRIDER_TARGET_FACTOR) * 4294967296.0 / bucket_seconds,
+            "hashrate": (accepted_diff / GHOSTRIDER_TARGET_FACTOR) * DIFF1_HASHES / bucket_seconds,
             "accepted": int(r.get("accepted") or 0),
             "rejected": int(r.get("rejected") or 0),
         })
@@ -170,6 +237,26 @@ def api_payouts(limit=100):
 
 FRONTEND_ROUTES = {"/", "/miners", "/workers", "/shares", "/blocks", "/blocks/pending", "/payouts"}
 
+LUCK_SCRIPT = r'''
+<script>
+(function(){
+  if(location.pathname !== '/') return;
+  const fmtHash=v=>{v=Number(v||0);if(v>=1e9)return(v/1e9).toFixed(2)+' GH/s';if(v>=1e6)return(v/1e6).toFixed(2)+' MH/s';if(v>=1e3)return(v/1e3).toFixed(2)+' kH/s';return v.toFixed(1)+' H/s'};
+  const fmtTime=s=>{if(s==null||!isFinite(s))return '—';s=Math.max(0,Number(s));if(s<60)return Math.round(s)+' sec';if(s<3600)return (s/60).toFixed(1)+' min';if(s<86400)return (s/3600).toFixed(1)+' hr';return (s/86400).toFixed(1)+' days'};
+  async function renderLuck(){
+    try{
+      const r=await fetch('/api/luck',{cache:'no-store'}); if(!r.ok)return;
+      const x=await r.json(); const root=document.querySelector('main#app'); if(!root)return;
+      let panel=document.getElementById('luck-panel');
+      if(!panel){panel=document.createElement('section');panel.id='luck-panel';const first=root.querySelector('.grid');if(first)first.insertAdjacentElement('afterend',panel);else root.prepend(panel)}
+      panel.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:end;gap:12px;flex-wrap:wrap"><div><h2 style="margin-bottom:4px">Pool Luck & Round</h2><div class="muted">Current round statistics based on accepted GhostRider work.</div></div><a href="/blocks">Blocks →</a></div><div class="grid" style="margin-top:14px"><div class="card"><div class="muted">Pool Hashrate</div><div class="value">${fmtHash(x.pool_hashrate)}</div></div><div class="card"><div class="muted">Network Difficulty</div><div class="value">${Number(x.network_difficulty||0).toPrecision(5)}</div></div><div class="card"><div class="muted">Estimated Time to Block</div><div class="value" style="font-size:22px">${fmtTime(x.eta_seconds)}</div></div><div class="card"><div class="muted">Round Effort</div><div class="value">${Number(x.round_effort_percent||0).toFixed(1)}%</div><div class="small muted">100% = expected work</div></div><div class="card"><div class="muted">Chance So Far</div><div class="value">${Number(x.chance_percent||0).toFixed(1)}%</div><div class="small muted">Probability by this effort</div></div><div class="card"><div class="muted">Round Shares</div><div class="value">${Number(x.round_accepted_shares||0).toLocaleString()}</div><div class="small muted">Round age ${fmtTime(x.round_seconds)}</div></div></div>`;
+    }catch(e){}
+  }
+  setTimeout(renderLuck,800); setInterval(renderLuck,10000);
+})();
+</script>
+'''
+
 
 class Handler(BaseHTTPRequestHandler):
     def send_json(self, obj, status=200):
@@ -182,7 +269,11 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def serve_file(self, target):
-        body = target.read_bytes()
+        if target == WEB_ROOT / "index.html":
+            text = target.read_text()
+            body = text.replace("</body>", LUCK_SCRIPT + "</body>").encode()
+        else:
+            body = target.read_bytes()
         self.send_response(200)
         self.send_header("Content-Type", mimetypes.guess_type(target.name)[0] or "application/octet-stream")
         self.send_header("Content-Length", str(len(body)))
@@ -194,6 +285,7 @@ class Handler(BaseHTTPRequestHandler):
         path = parsed.path
         query = parse_qs(parsed.query)
         try:
+            if path == "/api/luck": return self.send_json(api_luck())
             if path == "/api/summary": return self.send_json(api_summary())
             if path == "/api/blocks": return self.send_json(api_blocks((query.get("status") or [None])[0], (query.get("limit") or [100])[0]))
             if path == "/api/miners": return self.send_json(api_miners((query.get("limit") or [250])[0]))
