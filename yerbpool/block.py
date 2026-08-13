@@ -3,6 +3,7 @@ import struct
 
 PUBKEY_ADDRESS = 140
 SCRIPT_ADDRESS = 19
+GHOSTRIDER_TARGET_FACTOR = 65536
 
 
 def sha256d(data: bytes) -> bytes:
@@ -99,7 +100,7 @@ def coinbase_parts(template: dict, pool_address: str, extranonce1_size=4, extran
     # Yerbas Core's IncrementExtraNonce() requires the block height to be the
     # first item in the coinbase scriptSig, even when DIP0003 CbTx is active.
     # cpuminer-opt-gr also reads the height from this exact location before it
-    # starts GhostRider work.  Keep the height in coinb1 and place Stratum's
+    # starts GhostRider work. Keep the height in coinb1 and place Stratum's
     # extranonces immediately after it.
     version_type = 3 | (5 << 16)
     height = int(template["height"])
@@ -217,10 +218,17 @@ DIFF1_TARGET = int("00000000ffff000000000000000000000000000000000000000000000000
 
 
 def share_target(difficulty: float) -> int:
+    """Return the GhostRider share target for Stratum difficulty.
+
+    cpuminer-opt-gr registers GhostRider with opt_target_factor=65536, so a
+    Stratum difficulty D corresponds to the conventional difficulty D/65536.
+    The pool must apply the same factor when validating submitted shares.
+    """
     if difficulty <= 0:
         raise ValueError("difficulty must be positive")
-    scaled = max(1, int(difficulty * 1_000_000))
-    return (DIFF1_TARGET * 1_000_000) // scaled
+    effective = float(difficulty) / GHOSTRIDER_TARGET_FACTOR
+    target = int(DIFF1_TARGET / effective)
+    return min(target, (1 << 256) - 1)
 
 
 def block_bytes(header: bytes, coinbase: bytes, template: dict) -> bytes:
