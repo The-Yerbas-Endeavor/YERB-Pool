@@ -12,6 +12,53 @@ fi
 
 INSTALL_DIR=/opt/yerb-pool
 SERVICE_USER=yerbpool
+SSL_DOMAIN=""
+
+usage() {
+    cat <<'EOF'
+Usage:
+  bash install.sh
+  bash install.sh --ssl pool.example.com
+
+Options:
+  --ssl DOMAIN   Configure Nginx for DOMAIN and automatically request a
+                 Let's Encrypt certificate using Certbot.
+  -h, --help     Show this help.
+EOF
+}
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --ssl)
+            if [[ $# -lt 2 || -z "${2:-}" ]]; then
+                echo "ERROR: --ssl requires a domain name."
+                usage
+                exit 2
+            fi
+            SSL_DOMAIN="${2,,}"
+            shift 2
+            ;;
+        -h|--help)
+            usage
+            exit 0
+            ;;
+        *)
+            echo "ERROR: Unknown option: $1"
+            usage
+            exit 2
+            ;;
+    esac
+done
+
+valid_domain() {
+    [[ "$1" =~ ^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$ ]]
+}
+
+if [[ -n "$SSL_DOMAIN" ]] && ! valid_domain "$SSL_DOMAIN"; then
+    echo "ERROR: Invalid SSL domain: $SSL_DOMAIN"
+    echo "Use a hostname only, such as pool.yerbas.org."
+    exit 2
+fi
 
 echo "Installing YERB Pool dependencies..."
 $SUDO apt-get update
@@ -54,8 +101,6 @@ if [[ ! -f "$INSTALL_DIR/config.json" ]]; then
     fi
 fi
 
-# Preserve existing settings, repair obsolete GhostRider test difficulty values,
-# and add safe VarDiff defaults to older installs that predate VarDiff.
 $SUDO python3 - "$INSTALL_DIR/config.json" <<'PY'
 import json
 import sys
@@ -142,27 +187,8 @@ $SUDO systemctl restart yerb-pool
 
 DASHBOARD_URL="http://SERVER_IP/"
 
-configure_domain_https() {
-    local domain=""
-    local enable_ssl="n"
-
-    echo
-    echo "Optional domain / HTTPS setup"
-    echo "-----------------------------"
-    read -r -p "Configure a domain name for the pool website? (y/N): " configure_domain
-    if [[ ! "$configure_domain" =~ ^[Yy]$ ]]; then
-        return 0
-    fi
-
-    while true; do
-        read -r -p "Domain name (example: pool.yerbas.org): " domain
-        domain="${domain,,}"
-        if [[ "$domain" =~ ^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$ ]]; then
-            break
-        fi
-        echo "Invalid domain name. Enter a hostname only, without http://, https://, paths, or ports."
-    done
-
+configure_nginx_domain() {
+    local domain="$1"
     echo "Configuring Nginx for ${domain}..."
     $SUDO tee /etc/nginx/sites-available/yerb-pool >/dev/null <<EOF
 server {
@@ -180,61 +206,114 @@ server {
         proxy_set_header X-Forwarded-Proto \$scheme;
         proxy_set_header Upgrade \$http_upgrade;
         proxy_set_header Connection "upgrade";
+        proxy_read_timeout 30s;
     }
 
     access_log /var/log/nginx/yerb-pool-access.log;
     error_log /var/log/nginx/yerb-pool-error.log;
 }
 EOF
-
     $SUDO ln -sf /etc/nginx/sites-available/yerb-pool /etc/nginx/sites-enabled/yerb-pool
+    $SUDO rm -f /etc/nginx/sites-enabled/default
     $SUDO nginx -t
     $SUDO systemctl reload nginx
     DASHBOARD_URL="http://${domain}/"
+}
 
-    echo
-    echo "DNS check for ${domain}:"
+check_dns() {
+    local domain="$1"
+    local resolved_ips
     resolved_ips="$(getent ahostsv4 "$domain" 2>/dev/null | awk '{print $1}' | sort -u | tr '\n' ' ' || true)"
-    if [[ -n "$resolved_ips" ]]; then
-        echo "  Resolves to: ${resolved_ips}"
-    else
-        echo "  WARNING: ${domain} does not currently resolve to an IPv4 address."
-        echo "  Create an A record pointing ${domain} to this server before requesting a certificate."
-    fi
-
-    read -r -p "Secure ${domain} with a Let's Encrypt certificate using Certbot? (y/N): " enable_ssl
-    if [[ ! "$enable_ssl" =~ ^[Yy]$ ]]; then
-        return 0
-    fi
-
     if [[ -z "$resolved_ips" ]]; then
-        echo "Skipping Certbot because DNS is not resolving yet."
-        echo "After DNS is ready, run: sudo certbot --nginx -d ${domain}"
-        return 0
+        echo "ERROR: ${domain} does not currently resolve to an IPv4 address."
+        echo "Create an A record pointing the domain to this server, then retry."
+        return 1
+    fi
+    echo "DNS for ${domain}: ${resolved_ips}"
+    return 0
+}
+
+install_certbot_ssl() {
+    local domain="$1"
+
+    if ! check_dns "$domain"; then
+        return 1
     fi
 
-    echo "Installing Certbot..."
+    echo "Installing Certbot and Nginx plugin..."
     $SUDO apt-get update
     $SUDO apt-get install -y certbot python3-certbot-nginx
 
     if command -v ufw >/dev/null 2>&1; then
+        $SUDO ufw allow 80/tcp >/dev/null || true
         $SUDO ufw allow 443/tcp >/dev/null || true
     fi
 
+    echo "Verifying Nginx before certificate request..."
+    $SUDO nginx -t
+    $SUDO systemctl reload nginx
+
     echo "Requesting Let's Encrypt certificate for ${domain}..."
-    if $SUDO certbot --nginx -d "$domain"; then
+    if $SUDO certbot --nginx \
+        -d "$domain" \
+        --redirect \
+        --agree-tos \
+        --register-unsafely-without-email \
+        --non-interactive; then
         DASHBOARD_URL="https://${domain}/"
+        $SUDO systemctl enable certbot.timer >/dev/null 2>&1 || true
+        $SUDO systemctl start certbot.timer >/dev/null 2>&1 || true
         echo "HTTPS enabled successfully: ${DASHBOARD_URL}"
-        echo "Certbot installed its automatic certificate renewal timer."
-    else
-        echo "Certbot could not issue the certificate."
-        echo "The HTTP site remains configured at http://${domain}/"
-        echo "Verify DNS and ports 80/443, then retry: sudo certbot --nginx -d ${domain}"
+        echo "Automatic certificate renewal is enabled."
+        return 0
+    fi
+
+    echo "ERROR: Certbot could not issue the certificate."
+    echo "HTTP remains available at http://${domain}/"
+    echo "Verify DNS and inbound ports 80/443, then run:"
+    echo "  sudo certbot --nginx -d ${domain} --redirect"
+    return 1
+}
+
+configure_domain_interactive() {
+    local domain=""
+    local enable_ssl="n"
+    local configure_domain="n"
+
+    echo
+    echo "Optional domain / HTTPS setup"
+    echo "-----------------------------"
+    read -r -p "Configure a domain name for the pool website? (y/N): " configure_domain
+    if [[ ! "$configure_domain" =~ ^[Yy]$ ]]; then
+        return 0
+    fi
+
+    while true; do
+        read -r -p "Domain name (example: pool.yerbas.org): " domain
+        domain="${domain,,}"
+        if valid_domain "$domain"; then
+            break
+        fi
+        echo "Invalid domain name. Enter a hostname only, without http://, https://, paths, or ports."
+    done
+
+    configure_nginx_domain "$domain"
+    echo
+    check_dns "$domain" || true
+
+    read -r -p "Secure ${domain} with a Let's Encrypt certificate using Certbot? (y/N): " enable_ssl
+    if [[ "$enable_ssl" =~ ^[Yy]$ ]]; then
+        install_certbot_ssl "$domain" || true
     fi
 }
 
-if [[ -t 0 ]]; then
-    configure_domain_https
+if [[ -n "$SSL_DOMAIN" ]]; then
+    echo
+    echo "Automatic HTTPS setup requested for: $SSL_DOMAIN"
+    configure_nginx_domain "$SSL_DOMAIN"
+    install_certbot_ssl "$SSL_DOMAIN"
+elif [[ -t 0 ]]; then
+    configure_domain_interactive
 else
     echo "Non-interactive install detected; skipping optional domain/Certbot wizard."
 fi
