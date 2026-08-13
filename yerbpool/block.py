@@ -21,6 +21,28 @@ def compact_size(n: int) -> bytes:
     return b"\xff" + struct.pack("<Q", n)
 
 
+def _script_num(value: int) -> bytes:
+    """Bitcoin/CScriptNum minimal little-endian signed-magnitude encoding."""
+    value = int(value)
+    if value < 0:
+        raise ValueError("negative script number")
+    if value == 0:
+        return b""
+    out = bytearray()
+    while value:
+        out.append(value & 0xff)
+        value >>= 8
+    if out[-1] & 0x80:
+        out.append(0)
+    return bytes(out)
+
+
+def _push_data(data: bytes) -> bytes:
+    if len(data) > 75:
+        raise ValueError("small script push too large")
+    return bytes([len(data)]) + data
+
+
 def _b58decode(value: str) -> bytes:
     alphabet = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
     num = 0
@@ -74,11 +96,15 @@ def template_outputs(template: dict, pool_address: str):
 
 
 def coinbase_parts(template: dict, pool_address: str, extranonce1_size=4, extranonce2_size=4):
-    # Yerbas has DIP0003 active on mainnet. The coinbase is a v3/type-5 CbTx
-    # and the height lives in coinbase_payload, so scriptSig is free for pool
-    # extranonces. Core itself uses OP_RETURN here.
+    # Yerbas Core's IncrementExtraNonce() requires the block height to be the
+    # first item in the coinbase scriptSig, even when DIP0003 CbTx is active.
+    # cpuminer-opt-gr also reads the height from this exact location before it
+    # starts GhostRider work.  Keep the height in coinb1 and place Stratum's
+    # extranonces immediately after it.
     version_type = 3 | (5 << 16)
-    script_len = 1 + extranonce1_size + extranonce2_size
+    height = int(template["height"])
+    height_push = _push_data(_script_num(height))
+    script_len = len(height_push) + extranonce1_size + extranonce2_size
     if script_len < 2 or script_len > 100:
         raise ValueError("coinbase scriptSig length out of consensus range")
 
@@ -88,7 +114,7 @@ def coinbase_parts(template: dict, pool_address: str, extranonce1_size=4, extran
     prefix += b"\x00" * 32
     prefix += struct.pack("<I", 0xffffffff)
     prefix += compact_size(script_len)
-    prefix += b"\x6a"  # OP_RETURN, matching Yerbas Core's DIP0003 coinbase
+    prefix += height_push
 
     suffix = bytearray()
     suffix += struct.pack("<I", 0xffffffff)
@@ -98,6 +124,8 @@ def coinbase_parts(template: dict, pool_address: str, extranonce1_size=4, extran
         suffix += serialize_output(value, script)
     suffix += struct.pack("<I", 0)  # nLockTime
 
+    # DIP0003 coinbase extra payload remains present; it is separate from the
+    # consensus-required height item in scriptSig.
     payload = bytes.fromhex(template.get("coinbase_payload", ""))
     suffix += compact_size(len(payload))
     suffix += payload
