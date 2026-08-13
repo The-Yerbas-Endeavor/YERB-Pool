@@ -193,10 +193,13 @@ def header_bytes(template: dict, merkle_root_raw: bytes, ntime_hex: str, nonce_h
     ntime = int(ntime_hex, 16)
     bits = int(template["bits"], 16)
     nonce = int(nonce_hex, 16)
+    # merkle_root_raw is already the raw double-SHA256 byte sequence used in
+    # the serialized header. Reversing it here makes the server hash a
+    # different header than standard Stratum miners reconstruct.
     return (
         struct.pack("<I", version)
         + prev
-        + merkle_root_raw[::-1]
+        + merkle_root_raw
         + struct.pack("<I", ntime)
         + struct.pack("<I", bits)
         + struct.pack("<I", nonce)
