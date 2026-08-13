@@ -1,0 +1,1 @@
+YERB-Pool must not depend on or fetch Yerbas-Miner. Native GhostRider verification is sourced directly from Yerbas Core only.
