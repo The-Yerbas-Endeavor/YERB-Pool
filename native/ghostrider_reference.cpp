@@ -1,5 +1,5 @@
-#include <cstddef>
-#include <cstdint>
+#include "ghostrider_reference.h"
+
 #include <cstring>
 #include <limits>
 #include <stdexcept>
@@ -9,8 +9,6 @@
 #include "uint256.h"
 
 namespace yerbpool::ghostrider {
-
-using Hash256 = std::array<std::uint8_t, 32>;
 
 static uint256 previous_block_hash(const std::uint8_t* data, std::size_t size)
 {
