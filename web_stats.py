@@ -35,19 +35,10 @@ def _closed_db():
         con.close()
 
 
-# All functions in web.py resolve db() through the module globals at request
-# time, so replacing it here fixes connection lifetime for the original API
-# routes as well as the live metric overrides below.
 base.db = _closed_db
 
 
 def _wallet_balance_atomic():
-    """Return the actual pool wallet balance in atomic YERB units.
-
-    Prefer getwalletinfo.balance and fall back to getbalance for older Yerbas
-    wallet RPC implementations. Return None if wallet RPC is unavailable so
-    the UI can fall back without breaking the rest of the dashboard.
-    """
     try:
         info = base.rpc_call("getwalletinfo")
         if isinstance(info, dict) and info.get("balance") is not None:
@@ -69,23 +60,19 @@ def api_summary():
     with base.db() as con:
         accounts = base.one(
             con,
-            "SELECT COUNT(*) accounts, "
-            "COALESCE(SUM(balance_atomic),0) balance_atomic, "
-            "COALESCE(SUM(immature_balance_atomic),0) immature_atomic "
-            "FROM accounts",
+            "SELECT COUNT(*) accounts, COALESCE(SUM(balance_atomic),0) balance_atomic, "
+            "COALESCE(SUM(immature_balance_atomic),0) immature_atomic FROM accounts",
         )
         shares = base.one(
             con,
             "SELECT COUNT(*) shares, "
             "COALESCE(SUM(CASE WHEN accepted=1 THEN 1 ELSE 0 END),0) accepted, "
-            "COALESCE(SUM(CASE WHEN accepted=0 THEN 1 ELSE 0 END),0) rejected "
-            "FROM shares",
+            "COALESCE(SUM(CASE WHEN accepted=0 THEN 1 ELSE 0 END),0) rejected FROM shares",
         )
         workers = base.one(
             con,
-            """SELECT
-                 (SELECT COUNT(*) FROM workers) workers,
-                 COUNT(DISTINCT s.worker_id) active_workers
+            """SELECT (SELECT COUNT(*) FROM workers) workers,
+                      COUNT(DISTINCT s.worker_id) active_workers
                FROM shares s
                WHERE s.accepted=1 AND s.worker_id IS NOT NULL AND s.ts>=?""",
             (cutoff,),
@@ -94,14 +81,12 @@ def api_summary():
             con,
             "SELECT COUNT(*) blocks, "
             "COALESCE(SUM(CASE WHEN status='mature' THEN 1 ELSE 0 END),0) mature, "
-            "COALESCE(SUM(CASE WHEN status IN ('submitted','confirmed') THEN 1 ELSE 0 END),0) pending "
-            "FROM blocks",
+            "COALESCE(SUM(CASE WHEN status IN ('submitted','confirmed') THEN 1 ELSE 0 END),0) pending FROM blocks",
         )
         payouts = base.one(
             con,
             "SELECT COUNT(*) payouts, "
-            "COALESCE(SUM(CASE WHEN status='sent' THEN total_atomic ELSE 0 END),0) paid_atomic "
-            "FROM payouts",
+            "COALESCE(SUM(CASE WHEN status='sent' THEN total_atomic ELSE 0 END),0) paid_atomic FROM payouts",
         )
 
     accounts["miner_balance_atomic"] = int(accounts.get("balance_atomic") or 0)
@@ -112,13 +97,7 @@ def api_summary():
     else:
         accounts["wallet_rpc_ok"] = False
 
-    return {
-        "accounts": accounts,
-        "shares": shares,
-        "workers": workers,
-        "blocks": blocks,
-        "payouts": payouts,
-    }
+    return {"accounts": accounts, "shares": shares, "workers": workers, "blocks": blocks, "payouts": payouts}
 
 
 def api_workers(limit=500):
@@ -162,26 +141,18 @@ def api_luck():
     with base.db() as con:
         recent = base.one(
             con,
-            "SELECT COALESCE(SUM(difficulty),0) accepted_diff "
-            "FROM shares WHERE accepted=1 AND ts>=?",
+            "SELECT COALESCE(SUM(difficulty),0) accepted_diff FROM shares WHERE accepted=1 AND ts>=?",
             (cutoff,),
         )
-        last_block = base.one(
-            con,
-            "SELECT height,submitted_at FROM blocks ORDER BY id DESC LIMIT 1",
-        )
+        last_block = base.one(con, "SELECT height,submitted_at FROM blocks ORDER BY id DESC LIMIT 1")
         if last_block and last_block.get("submitted_at"):
             round_start = int(last_block["submitted_at"])
         else:
-            first = base.one(
-                con,
-                "SELECT MIN(ts) first_ts FROM shares WHERE accepted=1",
-            )
+            first = base.one(con, "SELECT MIN(ts) first_ts FROM shares WHERE accepted=1")
             round_start = int(first.get("first_ts") or now)
         round_stats = base.one(
             con,
-            "SELECT COUNT(*) accepted_shares, COALESCE(SUM(difficulty),0) accepted_diff "
-            "FROM shares WHERE accepted=1 AND ts>?",
+            "SELECT COUNT(*) accepted_shares, COALESCE(SUM(difficulty),0) accepted_diff FROM shares WHERE accepted=1 AND ts>?",
             (round_start,),
         )
 
@@ -192,18 +163,13 @@ def api_luck():
         / HASHRATE_WINDOW
     )
     network_diff = base.current_network_difficulty()
-    expected_stratum_diff = max(
-        network_diff * base.GHOSTRIDER_TARGET_FACTOR, 1e-30
-    )
+    expected_stratum_diff = max(network_diff * base.GHOSTRIDER_TARGET_FACTOR, 1e-30)
     round_diff = float(round_stats.get("accepted_diff") or 0)
     effort_ratio = round_diff / expected_stratum_diff
 
     import math
     chance = (1.0 - math.exp(-effort_ratio)) * 100.0
-    eta_seconds = (
-        network_diff * base.DIFF1_HASHES / pool_hashrate
-        if pool_hashrate > 0 else None
-    )
+    eta_seconds = network_diff * base.DIFF1_HASHES / pool_hashrate if pool_hashrate > 0 else None
 
     return {
         "pool_hashrate": pool_hashrate,
@@ -225,24 +191,31 @@ base.api_luck = api_luck
 
 
 class LiveHandler(base.Handler):
-    """Serve the existing dashboard with clearer miner balance labels."""
+    """Serve the existing dashboard with clearer reward and balance labels."""
 
     def serve_file(self, target):
         if target == base.WEB_ROOT / "index.html":
             text = target.read_text()
             text = text.replace(
                 "['Address','Workers','Accepted','Rejected','Balance','Immature','Total Paid']",
-                "['Address','Workers','Accepted','Rejected','Balance','Immature Balance','Total Paid']",
+                "['Address','Workers','Accepted','Rejected','Mature Balance','Immature Balance','Total Paid']",
             )
             text = text.replace(
                 '<div class="muted">Immature</div>',
                 '<div class="muted">Immature Balance</div>',
             )
             text = text.replace(
+                '<div class="muted">Balance</div>',
+                '<div class="muted">Mature Balance</div>',
+            )
+            text = text.replace(
                 "</head>",
                 '<link rel="stylesheet" href="/brand.css?v=1"></head>',
             )
-            body = text.replace("</body>", base.LUCK_SCRIPT + "</body>").encode()
+            body = text.replace(
+                "</body>",
+                base.LUCK_SCRIPT + '<script src="/reward_labels.js?v=1"></script></body>',
+            ).encode()
         else:
             body = target.read_bytes()
         self.send_response(200)
@@ -250,6 +223,7 @@ class LiveHandler(base.Handler):
             "Content-Type",
             mimetypes.guess_type(target.name)[0] or "application/octet-stream",
         )
+        self.send_header("Cache-Control", "no-store")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
