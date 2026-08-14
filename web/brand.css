@@ -85,7 +85,7 @@ main#app>.grid:first-child>.card,
   display:none!important;
 }
 
-/* The dashboard is the only route whose first direct child is the summary grid. */
+/* The dashboard is the only route whose first direct child includes a summary grid. */
 main#app>.grid:first-child:before{
   content:"CONNECT TO YERB POOL\A\A Stratum: stratum+tcp://pool.yerbas.org:3333\A Username: YOUR_YERB_ADDRESS.worker\A Password: x\A Algorithm: GhostRider\A\A Example: cpuminer-opt-gr -a gr -o stratum+tcp://pool.yerbas.org:3333 -u YOUR_YERB_ADDRESS.rig1 -p x";
   white-space:pre-wrap;
@@ -103,6 +103,62 @@ main#app>.grid:first-child:before{
   box-shadow:0 8px 28px rgba(0,0,0,.15);
 }
 
+/* Home dashboard layout: activity across the top, charts side-by-side,
+   then Top Workers / Recent Blocks / Miners in one compact row. */
+main#app:has(> .grid){
+  display:grid;
+  grid-template-columns:repeat(3,minmax(0,1fr));
+  column-gap:16px;
+  align-items:start;
+}
+main#app:has(> .grid)>section:first-of-type,
+main#app:has(> .grid)>.grid,
+main#app:has(> .grid)>section:nth-of-type(n+5),
+main#app:has(> .grid)>#miner-commands{
+  grid-column:1/-1;
+}
+main#app:has(> .grid)>section:nth-of-type(2),
+main#app:has(> .grid)>section:nth-of-type(3),
+main#app:has(> .grid)>section:nth-of-type(4){
+  min-width:0;
+  margin-top:16px;
+  padding:16px;
+  border:1px solid var(--yerb-border);
+  border-radius:10px;
+  background:linear-gradient(155deg,#171d18,#141714);
+}
+main#app:has(> .grid)>section:nth-of-type(2) .chart-card{
+  border:0!important;
+  padding:0;
+  background:transparent;
+}
+main#app:has(> .grid)>section:nth-of-type(2) .worker-bar{
+  grid-template-columns:minmax(85px,1fr) 1.6fr auto;
+  gap:8px;
+}
+main#app:has(> .grid)>section:nth-of-type(3) table,
+main#app:has(> .grid)>section:nth-of-type(4) table{
+  margin-top:8px;
+  background:transparent;
+}
+main#app:has(> .grid)>section:nth-of-type(3) th,
+main#app:has(> .grid)>section:nth-of-type(3) td,
+main#app:has(> .grid)>section:nth-of-type(4) th,
+main#app:has(> .grid)>section:nth-of-type(4) td{
+  padding:8px 6px;
+  font-size:12px;
+}
+main#app:has(> .grid)>section:first-of-type .metric-strip{
+  grid-template-columns:1fr 1fr 1.8fr 1fr 1.1fr 1.1fr;
+  gap:10px;
+}
+main#app:has(> .grid)>section:first-of-type .chart-grid{
+  grid-template-columns:repeat(2,minmax(0,1fr));
+}
+main#app:has(> .grid)>section:first-of-type .chart-card{
+  min-height:350px;
+}
+
 main:after{
   content:"YERB Pool • Powered by the Yerbas network • GhostRider";
   display:block;
@@ -114,6 +170,13 @@ main:after{
   font-size:12px;
   letter-spacing:.35px;
 }
+@media(max-width:980px){
+  main#app:has(> .grid){grid-template-columns:1fr}
+  main#app:has(> .grid)>section:nth-of-type(2),
+  main#app:has(> .grid)>section:nth-of-type(3),
+  main#app:has(> .grid)>section:nth-of-type(4){grid-column:1/-1}
+  main#app:has(> .grid)>section:first-of-type .metric-strip{grid-template-columns:repeat(3,minmax(0,1fr))}
+}
 @media(max-width:700px){
   header:after{font-size:100px;top:-18px}
   .brand>div:first-child{padding-left:52px}
@@ -122,4 +185,6 @@ main:after{
   .brand h1 a:after{display:none}
   .head:after{margin-top:10px;font-size:11px}
   main#app>.grid:first-child:before{font-size:11px;padding:15px;overflow-wrap:anywhere}
+  main#app:has(> .grid)>section:first-of-type .metric-strip{grid-template-columns:1fr 1fr}
+  main#app:has(> .grid)>section:first-of-type .chart-grid{grid-template-columns:1fr}
 }
