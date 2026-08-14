@@ -21,7 +21,8 @@
   "payouts": {
     "enabled": true,
     "coinbase_maturity": 100,
-    "check_interval_seconds": 60,
+    "block_check_interval_seconds": 60,
+    "check_interval_seconds": 7200,
     "minimum_payout": "1.00000000",
     "pool_fee_percent": 0.0
   },
