@@ -117,9 +117,42 @@
     }
   }
 
+  function groupHomePanels(){
+    if(location.pathname!=='/') return;
+    const main=document.querySelector('main#app');
+    if(!main) return;
+
+    const findSection=label=>[...main.querySelectorAll('h2')]
+      .find(h=>h.textContent.trim()===label)?.closest('section');
+    const workers=findSection('Top Workers');
+    const blocks=findSection('Recent Blocks');
+    const miners=findSection('Miners');
+    if(!workers || !blocks || !miners) return;
+
+    let row=document.getElementById('home-panel-row');
+    if(!row){
+      row=document.createElement('div');
+      row.id='home-panel-row';
+      workers.parentNode.insertBefore(row,workers);
+    }
+    if(workers.parentNode!==row) row.appendChild(workers);
+    if(blocks.parentNode!==row) row.appendChild(blocks);
+    if(miners.parentNode!==row) row.appendChild(miners);
+  }
+
   function install(){
     installAddressSearch();
     installHeaderConnect();
+    groupHomePanels();
+
+    if(location.pathname==='/'){
+      const main=document.querySelector('main#app');
+      if(main){
+        const observer=new MutationObserver(groupHomePanels);
+        observer.observe(main,{childList:true,subtree:true});
+        requestAnimationFrame(groupHomePanels);
+      }
+    }
   }
 
   if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',install);
