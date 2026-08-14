@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """YERB Pool dashboard runtime with live production metrics.
 
-All live/current hashrate values use one authoritative rolling 10-minute
+All live/current hashrate values use one authoritative rolling 2-minute
 accepted-share difficulty estimator. Historical graphs remain bucketed for
 trend display, but never provide the headline/current hashrate numbers.
 """
@@ -17,7 +17,7 @@ import web as base
 
 COIN = 100_000_000
 ACTIVE_WINDOW = 600
-HASHRATE_WINDOW = 600
+HASHRATE_WINDOW = 120
 
 
 @contextlib.contextmanager
@@ -110,7 +110,7 @@ def api_summary():
 
 
 def api_workers(limit=500):
-    """Workers with canonical rolling 10-minute hashrate."""
+    """Workers with canonical rolling 2-minute hashrate."""
     now = int(time.time())
     cutoff = now - HASHRATE_WINDOW
     limit = min(max(int(limit), 1), 1000)
@@ -232,7 +232,7 @@ def api_pool_history(hours=24, bucket_seconds=300):
 
 
 def _recent_pool_hashrate():
-    """Canonical rolling 10-minute pool hashrate."""
+    """Canonical rolling 2-minute pool hashrate."""
     cutoff = int(time.time()) - HASHRATE_WINDOW
     with base.db() as con:
         recent = base.one(
@@ -360,23 +360,24 @@ class LiveHandler(base.Handler):
                 "const active=w.filter(x=>x.active).slice(0,24);const stats=(await Promise.all(active.map(x=>get('/api/worker/'+x.id+'/stats?hours=24&bucket=300').catch(()=>null)))).filter(Boolean);const h=aggregateHistory(stats);",
                 "const h=await get('/api/pool/history?hours=24&bucket=300').catch(()=>[]);",
             )
-            # The headline current pool value comes from /api/luck, which now
-            # uses the canonical rolling estimator. Keep this fallback aligned.
-            text = text.replace(
-                "const current=w.reduce((n,x)=>n+Number(x.active?x.hashrate:0),0);",
-                "const current=w.reduce((n,x)=>n+Number(x.active?x.hashrate:0),0);",
-            )
-            # Worker/account detail pages must use the canonical API values,
-            # never average the final two graph buckets (the newest is partial).
+            # Worker/account detail pages must use canonical API values rather
+            # than averaging the latest graph buckets.
             old_latest = "latest=h.slice(-2).reduce((s,v)=>s+Number(v.hashrate||0),0)/Math.max(1,Math.min(2,h.length))"
             text = text.replace(old_latest, "latest=Number(x.hashrate||x.combined_hashrate||0)")
             text = text.replace(
                 "Accepted GhostRider share work from currently tracked workers.",
                 "Pool-wide GhostRider share work recorded during the last 24 hours.",
             )
+            # Prevent account/worker detail pages from tearing down and
+            # rebuilding their entire DOM on timers. Their live metric scripts
+            # update values in place instead.
             text = text.replace(
-                "Recent Hashrate</div><div class=\"value\">${hashRate(latest)}",
-                "Recent Hashrate</div><div class=\"value\">${hashRate(latest)}",
+                "if(location.pathname.startsWith('/worker/'))setInterval(worker,30000);",
+                "",
+            )
+            text = text.replace(
+                "if(location.pathname.startsWith('/account/'))setInterval(account,30000);",
+                "",
             )
             text = text.replace(
                 "</head>",
