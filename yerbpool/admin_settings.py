@@ -6,7 +6,7 @@ from pathlib import Path
 
 
 POOL_FEE_KEY = "pool_fee_percent"
-POOL_FEE_ADDRESS_KEY = "pool_fee_address"
+TREASURY_ADDRESS_KEY = "pool_treasury_address"
 YERB_ADDRESS_RE = re.compile(r"^y[1-9A-HJ-NP-Za-km-z]{25,40}$")
 
 
@@ -60,19 +60,9 @@ def get_pool_fee_percent(cfg):
     return min(100.0, max(0.0, value))
 
 
-def get_pool_fee_address(cfg):
-    fallback = str(cfg.get("payouts", {}).get("pool_fee_address", "") or "").strip()
-    raw = get_setting(cfg, POOL_FEE_ADDRESS_KEY, None)
-    return fallback if raw is None else str(raw or "").strip()
-
-
-def _persist_payout_setting(key, value):
-    config_path = Path("config.json")
-    if not config_path.exists():
-        return
-    disk = json.loads(config_path.read_text(encoding="utf-8"))
-    disk.setdefault("payouts", {})[key] = value
-    config_path.write_text(json.dumps(disk, indent=2) + "\n", encoding="utf-8")
+def get_treasury_address(cfg):
+    raw = get_setting(cfg, TREASURY_ADDRESS_KEY, None)
+    return str(raw or "").strip()
 
 
 def set_pool_fee_percent(cfg, value, persist_config=True):
@@ -82,20 +72,37 @@ def set_pool_fee_percent(cfg, value, persist_config=True):
     normalized = f"{value:.8f}".rstrip("0").rstrip(".") or "0"
     set_setting(cfg, POOL_FEE_KEY, normalized)
     cfg.setdefault("payouts", {})["pool_fee_percent"] = value
+
     if persist_config:
-        _persist_payout_setting("pool_fee_percent", value)
+        config_path = Path("config.json")
+        if config_path.exists():
+            disk = json.loads(config_path.read_text(encoding="utf-8"))
+            disk.setdefault("payouts", {})["pool_fee_percent"] = value
+            # External fee addresses are obsolete once the internal treasury is enabled.
+            disk.setdefault("payouts", {}).pop("pool_fee_address", None)
+            config_path.write_text(json.dumps(disk, indent=2) + "\n", encoding="utf-8")
     return value
 
 
-def set_pool_fee_address(cfg, value, persist_config=True):
+def set_treasury_address(cfg, value):
     address = str(value or "").strip()
-    if address and not YERB_ADDRESS_RE.fullmatch(address):
-        raise ValueError("pool fee address must be a valid YERB address")
-    set_setting(cfg, POOL_FEE_ADDRESS_KEY, address)
-    cfg.setdefault("payouts", {})["pool_fee_address"] = address
-    if persist_config:
-        _persist_payout_setting("pool_fee_address", address)
+    if not YERB_ADDRESS_RE.fullmatch(address):
+        raise ValueError("treasury address must be a valid YERB address")
+    set_setting(cfg, TREASURY_ADDRESS_KEY, address)
+    cfg.setdefault("payouts", {})["pool_treasury_address"] = address
+    cfg.setdefault("payouts", {}).pop("pool_fee_address", None)
     return address
+
+
+def ensure_treasury_address(cfg, rpc):
+    address = get_treasury_address(cfg)
+    if address:
+        cfg.setdefault("payouts", {})["pool_treasury_address"] = address
+        cfg.setdefault("payouts", {}).pop("pool_fee_address", None)
+        return address
+
+    address = str(rpc.call("getnewaddress", ["YERB-Pool-Treasury"]) or "").strip()
+    return set_treasury_address(cfg, address)
 
 
 def ensure_runtime_settings(cfg):
@@ -105,14 +112,8 @@ def ensure_runtime_settings(cfg):
             float(cfg.get("payouts", {}).get("pool_fee_percent", 0.0)),
             persist_config=False,
         )
-    if get_setting(cfg, POOL_FEE_ADDRESS_KEY, None) is None:
-        set_pool_fee_address(
-            cfg,
-            str(cfg.get("payouts", {}).get("pool_fee_address", "") or ""),
-            persist_config=False,
-        )
     cfg.setdefault("payouts", {})["pool_fee_percent"] = get_pool_fee_percent(cfg)
-    cfg.setdefault("payouts", {})["pool_fee_address"] = get_pool_fee_address(cfg)
+    cfg.setdefault("payouts", {}).pop("pool_fee_address", None)
 
 
 async def sync_runtime_settings(cfg, interval=2):
@@ -122,7 +123,10 @@ async def sync_runtime_settings(cfg, interval=2):
         try:
             payouts = cfg.setdefault("payouts", {})
             payouts["pool_fee_percent"] = get_pool_fee_percent(cfg)
-            payouts["pool_fee_address"] = get_pool_fee_address(cfg)
+            treasury = get_treasury_address(cfg)
+            if treasury:
+                payouts["pool_treasury_address"] = treasury
+            payouts.pop("pool_fee_address", None)
         except Exception:
             pass
         await asyncio.sleep(max(1, int(interval)))
