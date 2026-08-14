@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """YERB Pool dashboard runtime with live production metrics.
 
-This keeps the existing web.py routes/UI intact while overriding the summary,
-worker activity, luck/hashrate, pool history, and share API calculations with
-values derived directly from the live production database and Yerbas wallet RPC.
+All live/current hashrate values use one authoritative rolling 10-minute
+accepted-share difficulty estimator. Historical graphs remain bucketed for
+trend display, but never provide the headline/current hashrate numbers.
 """
 import contextlib
 import mimetypes
@@ -32,6 +32,19 @@ def _closed_db():
 
 
 base.db = _closed_db
+
+# Keep references to the original rich API responses; the live wrappers below
+# only replace their current hashrate fields with the canonical rolling value.
+_base_api_worker_stats = base.api_worker_stats
+_base_api_account = base.api_account
+
+
+def _hashrate_from_diff(accepted_diff, window_seconds=HASHRATE_WINDOW):
+    return (
+        (float(accepted_diff or 0) / base.GHOSTRIDER_TARGET_FACTOR)
+        * base.DIFF1_HASHES
+        / float(window_seconds)
+    )
 
 
 def _wallet_balance_atomic():
@@ -97,8 +110,9 @@ def api_summary():
 
 
 def api_workers(limit=500):
+    """Workers with canonical rolling 10-minute hashrate."""
     now = int(time.time())
-    cutoff = now - ACTIVE_WINDOW
+    cutoff = now - HASHRATE_WINDOW
     limit = min(max(int(limit), 1), 1000)
     with base.db() as con:
         result = base.rows(
@@ -117,22 +131,70 @@ def api_workers(limit=500):
         )
 
     for item in result:
-        recent_diff = float(item.get("recent_diff") or 0)
-        item["hashrate"] = (
-            (recent_diff / base.GHOSTRIDER_TARGET_FACTOR)
-            * base.DIFF1_HASHES
-            / HASHRATE_WINDOW
-        )
+        item["hashrate"] = _hashrate_from_diff(item.get("recent_diff"))
         last_activity = max(
             int(item.get("last_seen_at") or 0),
             int(item.get("last_share_at") or 0),
         )
         item["active"] = last_activity >= cutoff
+        item["hashrate_window_seconds"] = HASHRATE_WINDOW
+    return result
+
+
+def api_worker_stats(worker_id, hours=24, bucket_seconds=300):
+    """Worker history plus canonical rolling current hashrate."""
+    result = _base_api_worker_stats(worker_id, hours, bucket_seconds)
+    if result is None:
+        return None
+    now = int(time.time())
+    cutoff = now - HASHRATE_WINDOW
+    with base.db() as con:
+        recent = base.one(
+            con,
+            """SELECT COALESCE(SUM(difficulty),0) accepted_diff,
+                      COALESCE(MAX(CASE WHEN accepted=1 THEN ts ELSE NULL END),0) last_share_at
+               FROM shares
+               WHERE worker_id=? AND accepted=1 AND ts>=?""",
+            (int(worker_id), cutoff),
+        )
+    result["hashrate"] = _hashrate_from_diff(recent.get("accepted_diff"))
+    result["recent_diff"] = float(recent.get("accepted_diff") or 0)
+    result["last_share_at"] = int(recent.get("last_share_at") or 0)
+    result["hashrate_window_seconds"] = HASHRATE_WINDOW
+    result["active"] = max(
+        int(result.get("last_seen_at") or 0),
+        int(result.get("last_share_at") or 0),
+    ) >= cutoff
+    return result
+
+
+def api_account(address):
+    """Account data plus canonical rolling combined hashrate."""
+    result = _base_api_account(address)
+    if result is None:
+        return None
+    cutoff = int(time.time()) - HASHRATE_WINDOW
+    with base.db() as con:
+        recent = base.one(
+            con,
+            """SELECT COALESCE(SUM(s.difficulty),0) accepted_diff,
+                      COALESCE(MAX(CASE WHEN s.accepted=1 THEN s.ts ELSE NULL END),0) last_share_at,
+                      COUNT(DISTINCT CASE WHEN s.accepted=1 AND s.ts>=? THEN s.worker_id END) active_workers
+               FROM shares s
+               JOIN accounts a ON a.id=s.account_id
+               WHERE a.address=? AND s.accepted=1 AND s.ts>=?""",
+            (cutoff, address, cutoff),
+        )
+    result["combined_hashrate"] = _hashrate_from_diff(recent.get("accepted_diff"))
+    result["recent_diff"] = float(recent.get("accepted_diff") or 0)
+    result["last_share_at"] = int(recent.get("last_share_at") or 0)
+    result["active_workers"] = int(recent.get("active_workers") or 0)
+    result["hashrate_window_seconds"] = HASHRATE_WINDOW
     return result
 
 
 def api_pool_history(hours=24, bucket_seconds=300):
-    """Pool-wide share/hashrate history independent of current worker status."""
+    """Pool-wide historical share/hashrate buckets for graphing."""
     hours = min(max(int(hours), 1), 168)
     bucket_seconds = min(max(int(bucket_seconds), 60), 3600)
     now = int(time.time())
@@ -161,9 +223,7 @@ def api_pool_history(hours=24, bucket_seconds=300):
         accepted_diff = float(row.get("accepted_diff") or 0)
         history.append({
             "ts": t,
-            "hashrate": (
-                accepted_diff / base.GHOSTRIDER_TARGET_FACTOR
-            ) * base.DIFF1_HASHES / bucket_seconds,
+            "hashrate": _hashrate_from_diff(accepted_diff, bucket_seconds),
             "accepted": int(row.get("accepted") or 0),
             "rejected": int(row.get("rejected") or 0),
         })
@@ -172,21 +232,15 @@ def api_pool_history(hours=24, bucket_seconds=300):
 
 
 def _recent_pool_hashrate():
-    """Return a resilient 10-minute hashrate estimate from accepted shares."""
-    now = int(time.time())
-    cutoff = now - HASHRATE_WINDOW
+    """Canonical rolling 10-minute pool hashrate."""
+    cutoff = int(time.time()) - HASHRATE_WINDOW
     with base.db() as con:
         recent = base.one(
             con,
             "SELECT COALESCE(SUM(difficulty),0) accepted_diff FROM shares WHERE accepted=1 AND ts>=?",
             (cutoff,),
         )
-    recent_diff = float(recent.get("accepted_diff") or 0)
-    return (
-        (recent_diff / base.GHOSTRIDER_TARGET_FACTOR)
-        * base.DIFF1_HASHES
-        / HASHRATE_WINDOW
-    )
+    return _hashrate_from_diff(recent.get("accepted_diff"))
 
 
 def api_luck():
@@ -205,8 +259,6 @@ def api_luck():
             (round_start,),
         )
 
-    # Hashrate reporting should survive a temporary wallet/mining RPC failure.
-    # Network-derived luck fields can be unavailable without zeroing hashrate.
     try:
         network_diff = base.current_network_difficulty()
     except Exception:
@@ -225,6 +277,7 @@ def api_luck():
 
     return {
         "pool_hashrate": pool_hashrate,
+        "hashrate_window_seconds": HASHRATE_WINDOW,
         "network_difficulty": network_diff,
         "eta_seconds": eta_seconds,
         "round_start": round_start,
@@ -262,14 +315,17 @@ def api_shares(status=None, address=None, limit=250):
         return base.rows(con, sql, params)
 
 
+# Override the route functions used by web.py's Handler.
 base.api_summary = api_summary
 base.api_workers = api_workers
+base.api_worker_stats = api_worker_stats
+base.api_account = api_account
 base.api_luck = api_luck
 base.api_shares = api_shares
 
 
 class LiveHandler(base.Handler):
-    """Serve the existing dashboard with clearer reward and balance labels."""
+    """Serve the existing dashboard with standardized live metrics."""
 
     def do_GET(self):
         parsed = urlparse(self.path)
@@ -304,15 +360,23 @@ class LiveHandler(base.Handler):
                 "const active=w.filter(x=>x.active).slice(0,24);const stats=(await Promise.all(active.map(x=>get('/api/worker/'+x.id+'/stats?hours=24&bucket=300').catch(()=>null)))).filter(Boolean);const h=aggregateHistory(stats);",
                 "const h=await get('/api/pool/history?hours=24&bucket=300').catch(()=>[]);",
             )
-            # Keep displayed current hashrate tied to the same pool-wide share
-            # stream as the graph instead of depending on worker active flags.
+            # The headline current pool value comes from /api/luck, which now
+            # uses the canonical rolling estimator. Keep this fallback aligned.
             text = text.replace(
                 "const current=w.reduce((n,x)=>n+Number(x.active?x.hashrate:0),0);",
-                "const recentBuckets=h.slice(-2);const current=recentBuckets.length?recentBuckets.reduce((n,x)=>n+Number(x.hashrate||0),0)/recentBuckets.length:w.reduce((n,x)=>n+Number(x.active?x.hashrate:0),0);",
+                "const current=w.reduce((n,x)=>n+Number(x.active?x.hashrate:0),0);",
             )
+            # Worker/account detail pages must use the canonical API values,
+            # never average the final two graph buckets (the newest is partial).
+            old_latest = "latest=h.slice(-2).reduce((s,v)=>s+Number(v.hashrate||0),0)/Math.max(1,Math.min(2,h.length))"
+            text = text.replace(old_latest, "latest=Number(x.hashrate||x.combined_hashrate||0)")
             text = text.replace(
                 "Accepted GhostRider share work from currently tracked workers.",
                 "Pool-wide GhostRider share work recorded during the last 24 hours.",
+            )
+            text = text.replace(
+                "Recent Hashrate</div><div class=\"value\">${hashRate(latest)}",
+                "Recent Hashrate</div><div class=\"value\">${hashRate(latest)}",
             )
             text = text.replace(
                 "</head>",
@@ -320,7 +384,7 @@ class LiveHandler(base.Handler):
             )
             body = text.replace(
                 "</body>",
-                base.LUCK_SCRIPT + '<script src="/reward_labels.js?v=5"></script></body>',
+                base.LUCK_SCRIPT + '<script src="/reward_labels.js?v=6"></script></body>',
             ).encode()
         else:
             body = target.read_bytes()
@@ -336,5 +400,5 @@ class LiveHandler(base.Handler):
 
 
 if __name__ == "__main__":
-    print(f"YERB Pool web listening on http://{base.HOST}:{base.PORT} (live metrics)")
+    print(f"YERB Pool web listening on http://{base.HOST}:{base.PORT} (standardized live metrics)")
     ThreadingHTTPServer((base.HOST, base.PORT), LiveHandler).serve_forever()
