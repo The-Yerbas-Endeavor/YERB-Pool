@@ -2,14 +2,15 @@
 """YERB Pool dashboard runtime with live production metrics.
 
 This keeps the existing web.py routes/UI intact while overriding the summary,
-worker activity, luck/hashrate, and share API calculations with values derived
-directly from the live production database and Yerbas wallet RPC.
+worker activity, luck/hashrate, pool history, and share API calculations with
+values derived directly from the live production database and Yerbas wallet RPC.
 """
 import contextlib
 import mimetypes
 import sqlite3
 import time
 from http.server import ThreadingHTTPServer
+from urllib.parse import parse_qs, urlparse
 
 import web as base
 
@@ -135,6 +136,46 @@ def api_workers(limit=500):
     return result
 
 
+def api_pool_history(hours=24, bucket_seconds=300):
+    """Pool-wide share/hashrate history independent of current worker status."""
+    hours = min(max(int(hours), 1), 168)
+    bucket_seconds = min(max(int(bucket_seconds), 60), 3600)
+    now = int(time.time())
+    end = (now // bucket_seconds) * bucket_seconds
+    start = end - hours * 3600
+
+    with base.db() as con:
+        raw = base.rows(
+            con,
+            """SELECT (ts / ?) * ? bucket,
+                      COALESCE(SUM(CASE WHEN accepted=1 THEN difficulty ELSE 0 END),0) accepted_diff,
+                      COALESCE(SUM(CASE WHEN accepted=1 THEN 1 ELSE 0 END),0) accepted,
+                      COALESCE(SUM(CASE WHEN accepted=0 THEN 1 ELSE 0 END),0) rejected
+               FROM shares
+               WHERE ts>=? AND ts<?
+               GROUP BY bucket
+               ORDER BY bucket""",
+            (bucket_seconds, bucket_seconds, start, end + bucket_seconds),
+        )
+
+    by_bucket = {int(r["bucket"]): r for r in raw}
+    history = []
+    t = start
+    while t <= end:
+        row = by_bucket.get(t, {})
+        accepted_diff = float(row.get("accepted_diff") or 0)
+        history.append({
+            "ts": t,
+            "hashrate": (
+                accepted_diff / base.GHOSTRIDER_TARGET_FACTOR
+            ) * base.DIFF1_HASHES / bucket_seconds,
+            "accepted": int(row.get("accepted") or 0),
+            "rejected": int(row.get("rejected") or 0),
+        })
+        t += bucket_seconds
+    return history
+
+
 def api_luck():
     now = int(time.time())
     cutoff = now - HASHRATE_WINDOW
@@ -219,6 +260,20 @@ base.api_shares = api_shares
 class LiveHandler(base.Handler):
     """Serve the existing dashboard with clearer reward and balance labels."""
 
+    def do_GET(self):
+        parsed = urlparse(self.path)
+        if parsed.path == "/api/pool/history":
+            query = parse_qs(parsed.query)
+            try:
+                history = api_pool_history(
+                    (query.get("hours") or [24])[0],
+                    (query.get("bucket") or [300])[0],
+                )
+                return self.send_json(history)
+            except Exception as exc:
+                return self.send_json({"error": str(exc)}, 500)
+        return super().do_GET()
+
     def serve_file(self, target):
         if target == base.WEB_ROOT / "index.html":
             text = target.read_text()
@@ -234,13 +289,25 @@ class LiveHandler(base.Handler):
                 '<div class="muted">Balance</div>',
                 '<div class="muted">Mature Balance</div>',
             )
+            # Home-page graphs used to aggregate only workers that happened to
+            # be active at render time. Replace that source with pool-wide
+            # history directly from the shares table so existing 24h data is
+            # always available after restarts/disconnects.
+            text = text.replace(
+                "const active=w.filter(x=>x.active).slice(0,24);const stats=(await Promise.all(active.map(x=>get('/api/worker/'+x.id+'/stats?hours=24&bucket=300').catch(()=>null)))).filter(Boolean);const h=aggregateHistory(stats);",
+                "const h=await get('/api/pool/history?hours=24&bucket=300').catch(()=>[]);",
+            )
+            text = text.replace(
+                "Accepted GhostRider share work from currently tracked workers.",
+                "Pool-wide GhostRider share work recorded during the last 24 hours.",
+            )
             text = text.replace(
                 "</head>",
                 '<link rel="stylesheet" href="/brand.css?v=1"></head>',
             )
             body = text.replace(
                 "</body>",
-                base.LUCK_SCRIPT + '<script src="/reward_labels.js?v=3"></script></body>',
+                base.LUCK_SCRIPT + '<script src="/reward_labels.js?v=4"></script></body>',
             ).encode()
         else:
             body = target.read_bytes()
