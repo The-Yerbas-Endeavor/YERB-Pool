@@ -20,6 +20,8 @@ class PayoutManager:
             0,
             int(Decimal(str(pcfg.get("transaction_fee_reserve", "0.01"))) * COIN),
         )
+        self.pool_address = str(cfg.get("pool_address", ""))
+        self.payout_account = pcfg.get("account")
 
     async def start(self):
         asyncio.create_task(self._loop())
@@ -58,8 +60,22 @@ class PayoutManager:
                         block.get("height"), block["block_hash"], confirmations,
                     )
 
+    async def _resolve_payout_account(self):
+        if self.payout_account is not None:
+            return str(self.payout_account)
+        if not self.pool_address:
+            raise RuntimeError("pool_address is not configured")
+        account = await asyncio.to_thread(self.rpc.getaccount, self.pool_address)
+        self.payout_account = str(account)
+        logging.info(
+            "Using Yerbas wallet account %r for pool address %s",
+            self.payout_account,
+            self.pool_address,
+        )
+        return self.payout_account
+
     def _cap_accounts_to_wallet(self, accounts, wallet_atomic):
-        """Cap a payout batch to spendable wallet funds minus a fee reserve.
+        """Cap a payout batch to spendable wallet-account funds minus a fee reserve.
 
         The reduction is proportional across eligible accounts so no one miner
         absorbs the whole transaction-fee reserve. Any unpaid remainder stays in
@@ -98,17 +114,23 @@ class PayoutManager:
             return
 
         try:
-            wallet = await asyncio.to_thread(self.rpc.getwalletinfo)
-            wallet_balance = Decimal(str((wallet or {}).get("balance", 0)))
-            wallet_atomic = int(wallet_balance * COIN)
+            payout_account = await self._resolve_payout_account()
+            account_balance = await asyncio.to_thread(
+                self.rpc.getaccountbalance,
+                payout_account,
+                1,
+                False,
+            )
+            wallet_atomic = int(Decimal(str(account_balance or 0)) * COIN)
         except Exception:
-            logging.exception("Unable to read wallet balance before payout")
+            logging.exception("Unable to read payout account balance before payout")
             return
 
         accounts = self._cap_accounts_to_wallet(accounts, wallet_atomic)
         if not accounts:
             logging.info(
-                "Payout deferred: wallet balance %.8f YERB does not exceed fee reserve %.8f YERB",
+                "Payout deferred: account=%r balance %.8f YERB does not exceed fee reserve %.8f YERB",
+                payout_account,
                 wallet_atomic / COIN,
                 self.fee_reserve_atomic / COIN,
             )
@@ -125,8 +147,9 @@ class PayoutManager:
         }
         total_atomic = sum(int(item["amount_atomic"]) for item in items)
         logging.info(
-            "Sending payout batch id=%s recipients=%s total=%.8f YERB wallet=%.8f reserve=%.8f",
+            "Sending payout batch id=%s account=%r recipients=%s total=%.8f YERB balance=%.8f reserve=%.8f",
             payout_id,
+            payout_account,
             len(items),
             total_atomic / COIN,
             wallet_atomic / COIN,
@@ -139,6 +162,7 @@ class PayoutManager:
                 self.rpc.sendmany,
                 amounts,
                 f"YERB-Pool payout #{payout_id}",
+                payout_account,
             )
         except Exception as exc:
             message = str(exc).lower()
