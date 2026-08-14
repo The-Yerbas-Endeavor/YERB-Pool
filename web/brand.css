@@ -79,14 +79,14 @@ section h2:before{content:"";display:inline-block;width:4px;height:.9em;border-r
 code{color:#cae9cb}
 .metric strong{color:#e9f7ea}
 
-/* Hide the duplicate home summary cards and Pool Luck/Round before first paint. */
-main#app>.grid:first-child>.card,
+/* Hide duplicate home summary cards and Pool Luck/Round regardless of DOM order. */
+main#app>.grid>.card,
 #luck-panel{
   display:none!important;
 }
 
-/* The dashboard is the only route whose first direct child includes a summary grid. */
-main#app>.grid:first-child:before{
+/* The dashboard is the only route with a direct summary grid. */
+main#app>.grid:before{
   content:"CONNECT TO YERB POOL\A\A Stratum: stratum+tcp://pool.yerbas.org:3333\A Username: YOUR_YERB_ADDRESS.worker\A Password: x\A Algorithm: GhostRider\A\A Example: cpuminer-opt-gr -a gr -o stratum+tcp://pool.yerbas.org:3333 -u YOUR_YERB_ADDRESS.rig1 -p x";
   white-space:pre-wrap;
   grid-column:1/-1;
@@ -184,7 +184,7 @@ main:after{
   .brand h1{font-size:25px}
   .brand h1 a:after{display:none}
   .head:after{margin-top:10px;font-size:11px}
-  main#app>.grid:first-child:before{font-size:11px;padding:15px;overflow-wrap:anywhere}
+  main#app>.grid:before{font-size:11px;padding:15px;overflow-wrap:anywhere}
   main#app:has(> .grid)>section:first-of-type .metric-strip{grid-template-columns:1fr 1fr}
   main#app:has(> .grid)>section:first-of-type .chart-grid{grid-template-columns:1fr}
 }
