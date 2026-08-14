@@ -1,17 +1,8 @@
 import time
 
 
-def allocate_block_with_fee(db, block_id, pool_fee_percent=0.0, pool_fee_address=""):
-    """Allocate miner rewards and credit the configured pool fee address.
-
-    Miner allocations continue to use PoolDB.allocate_block_immature(). The
-    fee portion already recorded in blocks.pool_fee_atomic is then credited as
-    an immature block entry to the configured fee address. Because it uses the
-    normal account/ledger path, the fee matures, handles orphan rollback, and
-    participates in normal payouts just like any other balance.
-    """
-    db.allocate_block_immature(block_id, pool_fee_percent)
-
+def credit_pool_fee(db, block_id, pool_fee_address=""):
+    """Credit a block's recorded pool fee to the configured fee address."""
     address = str(pool_fee_address or "").strip()
     if not address:
         return
@@ -63,3 +54,9 @@ def allocate_block_with_fee(db, block_id, pool_fee_percent=0.0, pool_fee_address
             "UPDATE accounts SET immature_balance_atomic=immature_balance_atomic+?,updated_at=? WHERE id=?",
             (fee, now, int(account_id)),
         )
+
+
+def allocate_block_with_fee(db, block_id, pool_fee_percent=0.0, pool_fee_address=""):
+    """Allocate miner rewards, then credit the configured pool fee address."""
+    db.allocate_block_immature(block_id, pool_fee_percent)
+    credit_pool_fee(db, block_id, pool_fee_address)
