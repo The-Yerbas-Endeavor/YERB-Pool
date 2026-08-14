@@ -1,5 +1,6 @@
 import base64
 import json
+import urllib.error
 import urllib.request
 
 
@@ -23,8 +24,25 @@ class YerbasRPC:
             data=body,
             headers={"Content-Type": "application/json", "Authorization": self.auth},
         )
-        with urllib.request.urlopen(req, timeout=15) as r:
-            payload = json.loads(r.read().decode())
+        try:
+            with urllib.request.urlopen(req, timeout=15) as r:
+                payload = json.loads(r.read().decode())
+        except urllib.error.HTTPError as exc:
+            # Yerbas returns JSON-RPC errors with HTTP 500. Preserve the actual
+            # daemon error so payout failures are diagnosable instead of being
+            # reduced to the generic "HTTP Error 500" message.
+            raw = exc.read().decode(errors="replace")
+            try:
+                payload = json.loads(raw)
+            except Exception:
+                raise RuntimeError(
+                    f"RPC {method} HTTP {exc.code}: {raw or exc.reason}"
+                ) from exc
+            if payload.get("error"):
+                raise RuntimeError(f"RPC {method} failed: {payload['error']}") from exc
+            raise RuntimeError(
+                f"RPC {method} HTTP {exc.code}: {raw or exc.reason}"
+            ) from exc
         if payload.get("error"):
             raise RuntimeError(f"RPC {method} failed: {payload['error']}")
         return payload.get("result")
@@ -45,6 +63,8 @@ class YerbasRPC:
         return self.call("getwalletinfo")
 
     def sendmany(self, amounts, comment="YERB-Pool payout"):
-        # Yerbas follows the Bitcoin/Dash-style sendmany RPC:
-        # sendmany fromaccount {address:amount,...} minconf comment
-        return self.call("sendmany", ["", amounts, 1, comment])
+        # Yerbas Core expects:
+        # sendmany fromaccount {address:amount,...} minconf addlocked comment
+        # The previous pool call omitted addlocked and passed the comment in its
+        # place, causing a JSON type error before transaction creation.
+        return self.call("sendmany", ["", amounts, 1, False, comment])
