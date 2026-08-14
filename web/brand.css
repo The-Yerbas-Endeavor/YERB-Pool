@@ -30,14 +30,33 @@ header:after{
   color:rgba(101,196,102,.025);
   pointer-events:none;
 }
-.head:after{
-  content:"Block reward 80 YERB  •  Maturity 100 confirmations";
-  display:block;
-  margin-top:14px;
+.head:after{display:none!important;content:none!important}
+#yerb-header-connect{
+  display:flex;
+  align-items:center;
+  gap:7px;
+  margin-top:10px;
   color:#8fa893;
   font-size:12px;
-  letter-spacing:.3px;
+  letter-spacing:.2px;
+  flex-wrap:wrap;
 }
+#yerb-header-connect code{
+  color:#b9e6bb;
+  cursor:text;
+  user-select:all;
+  word-break:normal;
+}
+#yerb-header-connect button{
+  background:#1d2a20;
+  color:#b9e6bb;
+  border:1px solid #35553d;
+  border-radius:5px;
+  padding:3px 8px;
+  font-size:11px;
+  cursor:pointer;
+}
+#yerb-header-connect button:hover{border-color:var(--yerb);color:#e9f7ea}
 .brand>div:first-child{position:relative;padding-left:60px}
 .brand>div:first-child:before{
   content:"Y";
@@ -194,7 +213,7 @@ main:after{
   .brand>div:first-child:before{width:40px;height:40px;font-size:22px}
   .brand h1{font-size:25px}
   .brand h1 a:after{display:none}
-  .head:after{margin-top:10px;font-size:11px}
+  #yerb-header-connect{margin-top:8px;font-size:11px}
   main#app>.grid:before{font-size:11px;padding:15px;overflow-wrap:anywhere}
   main#app:has(> .grid)>section:first-of-type .metric-strip{grid-template-columns:1fr 1fr}
   main#app:has(> .grid)>section:first-of-type .chart-grid{grid-template-columns:1fr}
