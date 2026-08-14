@@ -360,6 +360,10 @@ class LiveHandler(base.Handler):
                 "const active=w.filter(x=>x.active).slice(0,24);const stats=(await Promise.all(active.map(x=>get('/api/worker/'+x.id+'/stats?hours=24&bucket=300').catch(()=>null)))).filter(Boolean);const h=aggregateHistory(stats);",
                 "const h=await get('/api/pool/history?hours=24&bucket=300').catch(()=>[]);",
             )
+            text = text.replace(
+                "const cards=[['Miners',s.accounts.accounts,'/miners'],['Active Workers',s.workers.active_workers,'/workers'],",
+                "const cards=[['Miners / Active',`${s.accounts.accounts} / ${s.workers.active_workers}`,'/miners'],",
+            )
             # Worker/account detail pages must use canonical API values rather
             # than averaging the latest graph buckets.
             old_latest = "latest=h.slice(-2).reduce((s,v)=>s+Number(v.hashrate||0),0)/Math.max(1,Math.min(2,h.length))"
