@@ -31,3 +31,8 @@ def _safe_connect(self):
 def install_safe_sqlite_connections():
     """Make every PoolDB/AccountingDB short-lived connection close reliably."""
     PoolDB._connect = _safe_connect
+
+
+def install_safe_connections():
+    """Backward-compatible alias for older pool.py installations."""
+    return install_safe_sqlite_connections()
