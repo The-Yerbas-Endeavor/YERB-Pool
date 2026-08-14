@@ -1,6 +1,54 @@
 (function(){
+  const STRATUM_URL='stratum+tcp://pool.yerbas.org:3333';
+
   function validAddress(value){
     return /^y[1-9A-HJ-NP-Za-km-z]{25,40}$/.test(value);
+  }
+
+  function copyStratum(button){
+    const done=()=>{
+      const old=button.textContent;
+      button.textContent='Copied!';
+      button.disabled=true;
+      setTimeout(()=>{button.textContent=old;button.disabled=false;},1200);
+    };
+    if(navigator.clipboard && window.isSecureContext){
+      navigator.clipboard.writeText(STRATUM_URL).then(done).catch(()=>fallbackCopy(done));
+    }else{
+      fallbackCopy(done);
+    }
+  }
+
+  function fallbackCopy(done){
+    const area=document.createElement('textarea');
+    area.value=STRATUM_URL;
+    area.setAttribute('readonly','');
+    area.style.cssText='position:fixed;opacity:0;pointer-events:none';
+    document.body.appendChild(area);
+    area.select();
+    try{document.execCommand('copy');done();}catch(e){}
+    area.remove();
+  }
+
+  function installHeaderConnect(){
+    if(document.getElementById('yerb-header-connect')) return;
+    const header=document.querySelector('header .head');
+    if(!header) return;
+
+    const row=document.createElement('div');
+    row.id='yerb-header-connect';
+    row.innerHTML=`<span>Connect:</span> <code title="Click to select">${STRATUM_URL}</code> <button type="button">Copy</button>`;
+    const code=row.querySelector('code');
+    const button=row.querySelector('button');
+    code.addEventListener('click',()=>{
+      const range=document.createRange();
+      range.selectNodeContents(code);
+      const selection=window.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+    });
+    button.addEventListener('click',()=>copyStratum(button));
+    header.appendChild(row);
   }
 
   function installAddressSearch(){
@@ -69,6 +117,11 @@
     }
   }
 
-  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',installAddressSearch);
-  else installAddressSearch();
+  function install(){
+    installAddressSearch();
+    installHeaderConnect();
+  }
+
+  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',install);
+  else install();
 })();
