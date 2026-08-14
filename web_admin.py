@@ -3,15 +3,20 @@ import base64
 import hashlib
 import hmac
 import json
+import time
 from html import escape
 from http.server import ThreadingHTTPServer
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 
 import web_stats as live
 from yerbpool.admin_settings import get_pool_fee_percent, set_pool_fee_percent
 
 
 CFG = live.base.CFG
+# Account pages need a live rolling estimate that is independent of partial
+# 5-minute chart buckets. The parent dashboard injects LUCK_SCRIPT into every
+# served index page, so append this small account-only enhancement there.
+live.base.LUCK_SCRIPT += '<script src="/account_live_hashrate.js?v=1"></script>'
 
 
 def _verify_password(password, spec):
@@ -57,6 +62,36 @@ def _public_settings():
         "coinbase_maturity": int(payouts.get("coinbase_maturity", 100)),
         "minimum_payout": str(payouts.get("minimum_payout", "1.00000000")),
         "check_interval_seconds": int(payouts.get("check_interval_seconds", 60)),
+    }
+
+
+def _account_hashrate(address):
+    """Rolling 10-minute hashrate for one payout address from accepted shares."""
+    cutoff = int(time.time()) - live.HASHRATE_WINDOW
+    with live.base.db() as con:
+        row = live.base.one(
+            con,
+            """SELECT COALESCE(SUM(s.difficulty),0) accepted_diff,
+                      COALESCE(MAX(s.ts),0) last_share_at,
+                      COUNT(DISTINCT s.worker_id) workers
+               FROM shares s
+               JOIN accounts a ON a.id=s.account_id
+               WHERE a.address=? AND s.accepted=1 AND s.ts>=?""",
+            (address, cutoff),
+        )
+    recent_diff = float(row.get("accepted_diff") or 0)
+    hashrate = (
+        (recent_diff / live.base.GHOSTRIDER_TARGET_FACTOR)
+        * live.base.DIFF1_HASHES
+        / live.HASHRATE_WINDOW
+    )
+    return {
+        "address": address,
+        "hashrate": hashrate,
+        "window_seconds": live.HASHRATE_WINDOW,
+        "accepted_difficulty": recent_diff,
+        "last_share_at": int(row.get("last_share_at") or 0),
+        "workers": int(row.get("workers") or 0),
     }
 
 
@@ -117,6 +152,11 @@ class AdminHandler(live.LiveHandler):
 
     def do_GET(self):
         path = urlparse(self.path).path
+        if path.startswith("/api/account-hashrate/"):
+            address = unquote(path[len("/api/account-hashrate/"):]).strip()
+            if not address:
+                return self.send_json({"error": "address is required"}, 400)
+            return self.send_json(_account_hashrate(address))
         if path == "/api/pool-settings":
             return self.send_json(_public_settings())
         if path == "/admin":
