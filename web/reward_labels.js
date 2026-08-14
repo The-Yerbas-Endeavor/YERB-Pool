@@ -36,6 +36,105 @@
     });
   }
 
+  function copyText(text, button) {
+    const done=()=>{
+      const old=button.textContent;
+      button.textContent='Copied!';
+      button.disabled=true;
+      setTimeout(()=>{button.textContent=old;button.disabled=false;},1200);
+    };
+    if(navigator.clipboard && window.isSecureContext){
+      navigator.clipboard.writeText(text).then(done).catch(()=>fallbackCopy(text,done));
+    } else {
+      fallbackCopy(text,done);
+    }
+  }
+
+  function fallbackCopy(text, done){
+    const area=document.createElement('textarea');
+    area.value=text;
+    area.setAttribute('readonly','');
+    area.style.position='fixed';
+    area.style.opacity='0';
+    document.body.appendChild(area);
+    area.select();
+    try{document.execCommand('copy');done();}catch(e){}
+    area.remove();
+  }
+
+  function ensureMinerCommands(){
+    if(location.pathname!=='/' || document.getElementById('miner-commands')) return;
+    const main=document.querySelector('main#app');
+    if(!main) return;
+
+    const commands=[
+      {
+        name:'cpuminer-opt-gr',
+        type:'CPU',
+        command:'cpuminer-opt-gr -a gr -o stratum+tcp://pool.yerbas.org:3333 -u YOUR_YERB_ADDRESS.cpu -p x'
+      },
+      {
+        name:'SRBMiner-MULTI',
+        type:'CPU / GPU',
+        command:'SRBMiner-MULTI --algorithm ghostrider --pool pool.yerbas.org:3333 --wallet YOUR_YERB_ADDRESS.srb --password x'
+      },
+      {
+        name:'BzMiner',
+        type:'GPU',
+        command:'bzminer -a ghostrider -w YOUR_YERB_ADDRESS.bz -p stratum+tcp://pool.yerbas.org:3333'
+      },
+      {
+        name:'WildRig Multi',
+        type:'GPU',
+        command:'wildrig.exe --algo ghostrider --url stratum+tcp://pool.yerbas.org:3333 --user YOUR_YERB_ADDRESS.wildrig --pass x'
+      },
+      {
+        name:'cpuminer-gr-avx2',
+        type:'CPU',
+        command:'cpuminer-gr-avx2 -a gr -o stratum+tcp://pool.yerbas.org:3333 -u YOUR_YERB_ADDRESS.avx2 -p x'
+      }
+    ];
+
+    const section=document.createElement('section');
+    section.id='miner-commands';
+    section.innerHTML=`
+      <div class="section-head">
+        <div>
+          <h2 style="margin-bottom:4px">Prebuilt Miner Commands</h2>
+          <div class="muted">Replace <code>YOUR_YERB_ADDRESS</code> with your payout address. Worker names after the dot can be changed.</div>
+        </div>
+      </div>
+      <div style="display:grid;gap:10px;margin-top:14px">
+        ${commands.map((m,i)=>`
+          <div class="card" style="padding:14px">
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:8px;flex-wrap:wrap">
+              <div><strong>${esc(m.name)}</strong> <span class="small muted">${esc(m.type)}</span></div>
+              <button type="button" class="miner-copy-btn" data-command-index="${i}" style="cursor:pointer">Copy</button>
+            </div>
+            <input class="miner-command-input" data-command-index="${i}" type="text" readonly value="${esc(m.command)}" style="width:100%;box-sizing:border-box;font-family:monospace;padding:10px 12px;border-radius:7px;border:1px solid rgba(100,255,140,.25);background:#0b120d;color:inherit" />
+          </div>`).join('')}
+      </div>`;
+
+    const connectHeading=[...main.querySelectorAll('h1,h2,h3')].find(h=>h.textContent.toLowerCase().includes('connect to yerb pool'));
+    const connectSection=connectHeading?.closest('section');
+    if(connectSection) connectSection.insertAdjacentElement('afterend',section);
+    else {
+      const reward=document.getElementById('reward-summary');
+      if(reward) reward.insertAdjacentElement('afterend',section); else main.prepend(section);
+    }
+
+    section.querySelectorAll('.miner-copy-btn').forEach(btn=>{
+      btn.addEventListener('click',()=>{
+        const idx=btn.dataset.commandIndex;
+        const input=section.querySelector(`.miner-command-input[data-command-index="${idx}"]`);
+        if(input) copyText(input.value,btn);
+      });
+    });
+    section.querySelectorAll('.miner-command-input').forEach(input=>{
+      input.addEventListener('click',()=>input.select());
+    });
+  }
+
   function rejectBreakdown(items) {
     const counts=new Map();
     for(const item of items||[]){
@@ -138,6 +237,7 @@
     await originalDashboard();
     removeShareSummaryCards();
     await ensureRewardSummary();
+    ensureMinerCommands();
   };
 
   const originalAccount = window.account;
@@ -211,6 +311,7 @@
       if(location.pathname==='/'){
         removeShareSummaryCards();
         ensureRewardSummary();
+        ensureMinerCommands();
       } else if(location.pathname.startsWith('/worker/')) {
         ensureWorkerRejectBreakdown();
       } else if(location.pathname.startsWith('/account/')) {
