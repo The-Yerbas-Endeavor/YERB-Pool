@@ -9,7 +9,7 @@ from yerbpool.ghostrider import ensure_available
 from yerbpool.jobs import JobManager
 from yerbpool.payouts import PayoutManager
 from yerbpool.rpc import YerbasRPC
-from yerbpool.sqlite_safe import install_safe_connections
+from yerbpool.sqlite_safe import install_safe_sqlite_connections
 from yerbpool.stratum import StratumServer
 
 
@@ -21,7 +21,7 @@ async def main():
     )
     ensure_available()
     logging.info("Native Yerbas GhostRider backend loaded")
-    install_safe_connections()
+    install_safe_sqlite_connections()
     logging.info("Safe SQLite connection cleanup enabled")
     db = AccountingDB(cfg["database"])
     ensure_runtime_settings(cfg)
