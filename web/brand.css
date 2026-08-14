@@ -215,3 +215,58 @@ main:after{display:none!important;content:none!important}
   main#app:has(> .grid)>section:first-of-type .metric-strip{grid-template-columns:1fr 1fr}
   main#app:has(> .grid)>section:first-of-type .chart-grid{grid-template-columns:1fr}
 }
+
+/* Stable lower dashboard row: Top Workers / Recent Blocks / Miners. */
+main#app:has(> .grid)>#home-panel-row{
+  grid-column:1/-1;
+  order:2;
+  display:grid;
+  grid-template-columns:repeat(3,minmax(0,1fr));
+  gap:16px;
+  margin-top:16px;
+  align-items:start;
+}
+main#app:has(> .grid)>#home-panel-row>section{
+  min-width:0;
+  margin:0;
+  padding:16px;
+  border:1px solid var(--yerb-border);
+  border-radius:10px;
+  background:linear-gradient(155deg,#171d18,#141714);
+}
+main#app:has(> .grid)>#home-panel-row>section:first-child .chart-card{
+  border:0!important;
+  padding:0;
+  background:transparent;
+}
+main#app:has(> .grid)>#home-panel-row>section:first-child .worker-bar{
+  grid-template-columns:minmax(110px,1fr) 1.8fr auto;
+  gap:10px;
+}
+main#app:has(> .grid)>#home-panel-row table{
+  margin-top:8px;
+  background:transparent;
+}
+main#app:has(> .grid)>#home-panel-row th,
+main#app:has(> .grid)>#home-panel-row td{
+  padding:8px 7px;
+  font-size:12px;
+}
+
+/* Any remaining direct home sections belong below the three-column row. */
+main#app:has(> .grid)>section:not(:first-of-type){
+  grid-column:1/-1!important;
+  order:4!important;
+  min-width:0;
+  margin-top:26px;
+  padding:0;
+  border:0;
+  border-radius:0;
+  background:transparent;
+}
+
+@media(max-width:1180px){
+  main#app:has(> .grid)>#home-panel-row{
+    grid-template-columns:1fr;
+  }
+}
