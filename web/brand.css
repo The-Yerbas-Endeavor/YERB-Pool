@@ -98,13 +98,11 @@ section h2:before{content:"";display:inline-block;width:4px;height:.9em;border-r
 code{color:#cae9cb}
 .metric strong{color:#e9f7ea}
 
-/* Hide duplicate home summary cards and Pool Luck/Round regardless of DOM order. */
 main#app>.grid>.card,
 #luck-panel{
   display:none!important;
 }
 
-/* The dashboard is the only route with a direct summary grid. */
 main#app>.grid:before{
   content:"CONNECT TO YERB POOL\A\A Stratum: stratum+tcp://pool.yerbas.org:3333\A Username: YOUR_YERB_ADDRESS.worker\A Password: x\A Algorithm: GhostRider\A\A Example: cpuminer-opt-gr -a gr -o stratum+tcp://pool.yerbas.org:3333 -u YOUR_YERB_ADDRESS.rig1 -p x";
   white-space:pre-wrap;
@@ -122,8 +120,6 @@ main#app>.grid:before{
   box-shadow:0 8px 28px rgba(0,0,0,.15);
 }
 
-/* Home dashboard layout: activity across the top, charts side-by-side,
-   then Top Workers / Recent Blocks / Miners in one compact row. */
 main#app:has(> .grid){
   max-width:1600px;
   display:grid;
@@ -137,8 +133,6 @@ main#app:has(> .grid)>section:nth-of-type(n+5),
 main#app:has(> .grid)>#miner-commands{
   grid-column:1/-1;
 }
-
-/* Keep the visual order stable even when dashboard JS moves DOM nodes. */
 main#app:has(> .grid)>section:first-of-type{order:1}
 main#app:has(> .grid)>section:nth-of-type(2),
 main#app:has(> .grid)>section:nth-of-type(3),
@@ -189,17 +183,20 @@ main#app:has(> .grid)>section:first-of-type .chart-card{
   min-height:350px;
 }
 
-main:after{
-  content:"YERB Pool • Powered by the Yerbas network • GhostRider";
-  display:block;
-  margin-top:48px;
-  padding:22px 0 8px;
+main:after{display:none!important;content:none!important}
+#yerb-footer{
+  max-width:1600px;
+  margin:48px auto 0;
+  padding:22px 24px 28px;
   border-top:1px solid var(--yerb-border);
   color:#728875;
   text-align:center;
   font-size:12px;
   letter-spacing:.35px;
 }
+#yerb-footer a{color:#8edb91;text-decoration:none}
+#yerb-footer a:hover{text-decoration:underline}
+
 @media(max-width:1180px){
   main#app:has(> .grid){grid-template-columns:1fr}
   main#app:has(> .grid)>section:nth-of-type(2),
