@@ -366,7 +366,7 @@ class LiveHandler(base.Handler):
             )
             text = text.replace(
                 '<div class="metric"><span class="muted small">Rejected shares / 24h</span><strong>${rejected24.toLocaleString()}</strong></div>',
-                '<div class="metric"><span class="muted small">Miners / Active</span><strong>${s.accounts.accounts} / ${s.workers.active_workers}</strong></div>',
+                '<a class="metric" href="/miners" style="display:block;color:inherit;text-decoration:none"><span class="muted small">Miners / Active</span><strong>${s.accounts.accounts} / ${s.workers.active_workers}</strong></a>',
             )
             # Worker/account detail pages must use canonical API values rather
             # than averaging the latest graph buckets.
