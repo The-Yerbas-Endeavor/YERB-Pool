@@ -62,9 +62,18 @@ class YerbasRPC:
     def getwalletinfo(self):
         return self.call("getwalletinfo")
 
-    def sendmany(self, amounts, comment="YERB-Pool payout"):
+    def getaccount(self, address):
+        return str(self.call("getaccount", [address]) or "")
+
+    def getaccountbalance(self, account, minconf=1, addlocked=False):
+        return self.call("getbalance", [str(account), int(minconf), bool(addlocked)])
+
+    def sendmany(self, amounts, comment="YERB-Pool payout", from_account=""):
         # Yerbas Core expects:
         # sendmany fromaccount {address:amount,...} minconf addlocked comment
-        # The previous pool call omitted addlocked and passed the comment in its
-        # place, causing a JSON type error before transaction creation.
-        return self.call("sendmany", ["", amounts, 1, False, comment])
+        # Yerbas still enforces the legacy from-account balance before wallet-wide
+        # coin selection, so payouts must use the account assigned to pool_address.
+        return self.call(
+            "sendmany",
+            [str(from_account), amounts, 1, False, comment],
+        )
