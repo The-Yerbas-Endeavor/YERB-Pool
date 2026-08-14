@@ -1,10 +1,13 @@
 import asyncio
 import json
+import re
 import sqlite3
 from pathlib import Path
 
 
 POOL_FEE_KEY = "pool_fee_percent"
+POOL_FEE_ADDRESS_KEY = "pool_fee_address"
+YERB_ADDRESS_RE = re.compile(r"^y[1-9A-HJ-NP-Za-km-z]{25,40}$")
 
 
 def _db_path(cfg):
@@ -57,6 +60,21 @@ def get_pool_fee_percent(cfg):
     return min(100.0, max(0.0, value))
 
 
+def get_pool_fee_address(cfg):
+    fallback = str(cfg.get("payouts", {}).get("pool_fee_address", "") or "").strip()
+    raw = get_setting(cfg, POOL_FEE_ADDRESS_KEY, None)
+    return fallback if raw is None else str(raw or "").strip()
+
+
+def _persist_payout_setting(key, value):
+    config_path = Path("config.json")
+    if not config_path.exists():
+        return
+    disk = json.loads(config_path.read_text(encoding="utf-8"))
+    disk.setdefault("payouts", {})[key] = value
+    config_path.write_text(json.dumps(disk, indent=2) + "\n", encoding="utf-8")
+
+
 def set_pool_fee_percent(cfg, value, persist_config=True):
     value = float(value)
     if not 0.0 <= value <= 100.0:
@@ -64,14 +82,20 @@ def set_pool_fee_percent(cfg, value, persist_config=True):
     normalized = f"{value:.8f}".rstrip("0").rstrip(".") or "0"
     set_setting(cfg, POOL_FEE_KEY, normalized)
     cfg.setdefault("payouts", {})["pool_fee_percent"] = value
-
     if persist_config:
-        config_path = Path("config.json")
-        if config_path.exists():
-            disk = json.loads(config_path.read_text(encoding="utf-8"))
-            disk.setdefault("payouts", {})["pool_fee_percent"] = value
-            config_path.write_text(json.dumps(disk, indent=2) + "\n", encoding="utf-8")
+        _persist_payout_setting("pool_fee_percent", value)
     return value
+
+
+def set_pool_fee_address(cfg, value, persist_config=True):
+    address = str(value or "").strip()
+    if address and not YERB_ADDRESS_RE.fullmatch(address):
+        raise ValueError("pool fee address must be a valid YERB address")
+    set_setting(cfg, POOL_FEE_ADDRESS_KEY, address)
+    cfg.setdefault("payouts", {})["pool_fee_address"] = address
+    if persist_config:
+        _persist_payout_setting("pool_fee_address", address)
+    return address
 
 
 def ensure_runtime_settings(cfg):
@@ -81,7 +105,14 @@ def ensure_runtime_settings(cfg):
             float(cfg.get("payouts", {}).get("pool_fee_percent", 0.0)),
             persist_config=False,
         )
+    if get_setting(cfg, POOL_FEE_ADDRESS_KEY, None) is None:
+        set_pool_fee_address(
+            cfg,
+            str(cfg.get("payouts", {}).get("pool_fee_address", "") or ""),
+            persist_config=False,
+        )
     cfg.setdefault("payouts", {})["pool_fee_percent"] = get_pool_fee_percent(cfg)
+    cfg.setdefault("payouts", {})["pool_fee_address"] = get_pool_fee_address(cfg)
 
 
 async def sync_runtime_settings(cfg, interval=2):
@@ -89,7 +120,9 @@ async def sync_runtime_settings(cfg, interval=2):
     ensure_runtime_settings(cfg)
     while True:
         try:
-            cfg.setdefault("payouts", {})["pool_fee_percent"] = get_pool_fee_percent(cfg)
+            payouts = cfg.setdefault("payouts", {})
+            payouts["pool_fee_percent"] = get_pool_fee_percent(cfg)
+            payouts["pool_fee_address"] = get_pool_fee_address(cfg)
         except Exception:
             pass
         await asyncio.sleep(max(1, int(interval)))
