@@ -207,7 +207,7 @@ main#app:has(> .grid)>#home-panel-row{
   grid-template-columns:repeat(3,minmax(0,1fr));
   gap:16px;
   margin-top:16px;
-  align-items:start;
+  align-items:stretch;
 }
 main#app:has(> .grid)>#home-panel-row>section{
   min-width:0;
@@ -216,6 +216,10 @@ main#app:has(> .grid)>#home-panel-row>section{
   border:1px solid var(--yerb-border);
   border-radius:10px;
   background:linear-gradient(155deg,#171d18,#141714);
+  height:100%;
+  box-sizing:border-box;
+  display:flex;
+  flex-direction:column;
 }
 main#app:has(> .grid)>#home-panel-row>section:first-child .chart-card{
   border:0!important;
