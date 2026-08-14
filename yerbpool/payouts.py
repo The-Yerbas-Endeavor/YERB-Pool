@@ -12,7 +12,16 @@ class PayoutManager:
         self.db = db
         pcfg = cfg.get("payouts", {})
         self.enabled = bool(pcfg.get("enabled", True))
-        self.interval = max(10, int(pcfg.get("check_interval_seconds", 60)))
+
+        # Block confirmation/maturity tracking must remain frequent, while
+        # actual miner payments are intentionally batched every two hours.
+        self.block_check_interval = max(10, int(pcfg.get("block_check_interval_seconds", 60)))
+        configured_payout_interval = int(pcfg.get("check_interval_seconds", 7200))
+        # Migrate the original 60-second default automatically on existing installs.
+        if configured_payout_interval == 60:
+            configured_payout_interval = 7200
+        self.payout_interval = max(10, configured_payout_interval)
+
         self.maturity_confirmations = max(1, int(pcfg.get("coinbase_maturity", 100)))
         self.minimum_atomic = int(Decimal(str(pcfg.get("minimum_payout", "1.0"))) * COIN)
         self.pool_fee_percent = float(pcfg.get("pool_fee_percent", 0.0))
@@ -24,17 +33,34 @@ class PayoutManager:
         self.payout_account = pcfg.get("account")
 
     async def start(self):
-        asyncio.create_task(self._loop())
+        logging.info(
+            "Payout scheduler enabled=%s interval=%ss block_check=%ss",
+            self.enabled,
+            self.payout_interval,
+            self.block_check_interval,
+        )
+        asyncio.create_task(self._block_loop())
+        if self.enabled:
+            asyncio.create_task(self._payout_loop())
 
-    async def _loop(self):
+    async def _block_loop(self):
         while True:
             try:
                 await self.process_blocks()
-                if self.enabled:
-                    await self.process_payouts()
             except Exception:
-                logging.exception("Payout manager cycle failed")
-            await asyncio.sleep(self.interval)
+                logging.exception("Block maturity cycle failed")
+            await asyncio.sleep(self.block_check_interval)
+
+    async def _payout_loop(self):
+        # Wait one full payout interval before the first scheduled batch after
+        # service startup. This prevents a restart from causing an immediate
+        # unscheduled payment.
+        while True:
+            await asyncio.sleep(self.payout_interval)
+            try:
+                await self.process_payouts()
+            except Exception:
+                logging.exception("Payout cycle failed")
 
     async def process_blocks(self):
         for block in self.db.pending_blocks():
@@ -111,6 +137,7 @@ class PayoutManager:
     async def process_payouts(self):
         accounts = self.db.eligible_payout_accounts(self.minimum_atomic)
         if not accounts:
+            logging.info("Scheduled payout check: no eligible miners")
             return
 
         try:
@@ -136,6 +163,8 @@ class PayoutManager:
             )
             return
 
+        # All eligible miners are collected into one payout record and one
+        # sendmany RPC transaction for this scheduled two-hour cycle.
         payout_id = self.db.create_payout(accounts)
         items = self.db.payout_items(payout_id)
         if not items:
@@ -147,7 +176,7 @@ class PayoutManager:
         }
         total_atomic = sum(int(item["amount_atomic"]) for item in items)
         logging.info(
-            "Sending payout batch id=%s account=%r recipients=%s total=%.8f YERB balance=%.8f reserve=%.8f",
+            "Sending combined payout batch id=%s account=%r recipients=%s total=%.8f YERB balance=%.8f reserve=%.8f",
             payout_id,
             payout_account,
             len(items),
