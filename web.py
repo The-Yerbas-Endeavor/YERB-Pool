@@ -106,7 +106,14 @@ def api_luck():
 
 def api_summary():
     with db() as con:
-        accounts = one(con, "SELECT COUNT(*) accounts, COALESCE(SUM(balance_atomic),0) balance_atomic, COALESCE(SUM(immature_balance_atomic),0) immature_atomic FROM accounts")
+        accounts = one(con, """SELECT COUNT(*) accounts,
+            COALESCE(SUM(a.balance_atomic),0) balance_atomic,
+            COALESCE(SUM(a.immature_balance_atomic),0) immature_atomic
+            FROM accounts a
+            WHERE NOT EXISTS (
+                SELECT 1 FROM settings s
+                WHERE s.key='pool_treasury_address' AND s.value=a.address
+            )""")
         shares = one(con, "SELECT COUNT(*) shares, COALESCE(SUM(CASE WHEN accepted=1 THEN 1 ELSE 0 END),0) accepted, COALESCE(SUM(CASE WHEN accepted=0 THEN 1 ELSE 0 END),0) rejected FROM shares")
         workers = one(con, "SELECT COUNT(*) workers, COALESCE(SUM(CASE WHEN last_seen_at >= strftime('%s','now')-600 THEN 1 ELSE 0 END),0) active_workers FROM workers")
         blocks = one(con, "SELECT COUNT(*) blocks, COALESCE(SUM(CASE WHEN status='mature' THEN 1 ELSE 0 END),0) mature, COALESCE(SUM(CASE WHEN status IN ('submitted','confirmed') THEN 1 ELSE 0 END),0) pending FROM blocks")
@@ -135,6 +142,10 @@ def api_miners(limit=250):
             COUNT(w.id) worker_count, COALESCE(MAX(w.last_seen_at),0) last_seen_at,
             COALESCE(SUM(w.accepted_shares),0) accepted_shares, COALESCE(SUM(w.rejected_shares),0) rejected_shares
             FROM accounts a LEFT JOIN workers w ON w.account_id=a.id
+            WHERE NOT EXISTS (
+                SELECT 1 FROM settings s
+                WHERE s.key='pool_treasury_address' AND s.value=a.address
+            )
             GROUP BY a.id ORDER BY last_seen_at DESC LIMIT ?""", (min(max(int(limit), 1), 1000),))
 
 
