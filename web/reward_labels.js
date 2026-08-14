@@ -108,12 +108,41 @@
 
     const section=document.createElement('section');
     section.id='miner-commands';
-    section.innerHTML=`<div class="section-head"><div><h2 style="margin-bottom:4px">Prebuilt Miner Commands</h2><div class="muted">Replace <code>YOUR_YERB_ADDRESS</code> with your payout address. Worker names after the dot can be changed.</div></div></div><div style="display:grid;gap:10px;margin-top:14px">${commands.map((m,i)=>`<div class="card" style="padding:14px"><div style="display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:8px;flex-wrap:wrap"><div><strong>${esc(m.name)}</strong> <span class="small muted">${esc(m.type)}</span></div><button type="button" class="miner-copy-btn" data-command-index="${i}" style="cursor:pointer">Copy</button></div><input class="miner-command-input" data-command-index="${i}" type="text" readonly value="${esc(m.command)}" style="width:100%;box-sizing:border-box;font-family:monospace;padding:10px 12px;border-radius:7px;border:1px solid rgba(100,255,140,.25);background:#0b120d;color:inherit" /></div>`).join('')}</div>`;
+    section.innerHTML=`<div class="section-head"><div><h2 style="margin-bottom:4px">Prebuilt Miner Commands</h2><div class="muted">Enter your Yerbas payout address below. All commands update automatically; worker names after the dot can be changed.</div></div></div>
+      <div class="card" style="padding:14px;margin-top:14px">
+        <label for="miner-address-input" style="display:block;font-weight:700;margin-bottom:7px">Yerbas payout address</label>
+        <input id="miner-address-input" type="text" autocomplete="off" spellcheck="false"
+          placeholder="Enter your YERB address"
+          style="width:100%;box-sizing:border-box;font-family:monospace;padding:11px 12px;border-radius:7px;border:1px solid rgba(100,255,140,.35);background:#0b120d;color:inherit" />
+        <div id="miner-address-message" class="small muted" style="margin-top:7px">Commands will update as you type.</div>
+      </div>
+      <div style="display:grid;gap:10px;margin-top:10px">${commands.map((m,i)=>`<div class="card" style="padding:14px"><div style="display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:8px;flex-wrap:wrap"><div><strong>${esc(m.name)}</strong> <span class="small muted">${esc(m.type)}</span></div><button type="button" class="miner-copy-btn" data-command-index="${i}" style="cursor:pointer">Copy</button></div><input class="miner-command-input" data-command-index="${i}" data-template="${esc(m.command)}" type="text" readonly value="${esc(m.command)}" style="width:100%;box-sizing:border-box;font-family:monospace;padding:10px 12px;border-radius:7px;border:1px solid rgba(100,255,140,.25);background:#0b120d;color:inherit" /></div>`).join('')}</div>`;
 
     const connectHeading=[...main.querySelectorAll('h1,h2,h3')].find(h=>h.textContent.toLowerCase().includes('connect to yerb pool'));
     const connectSection=connectHeading?.closest('section');
     if(connectSection) connectSection.insertAdjacentElement('afterend',section);
     else main.appendChild(section);
+
+    const addressInput=section.querySelector('#miner-address-input');
+    const addressMessage=section.querySelector('#miner-address-message');
+    const commandInputs=[...section.querySelectorAll('.miner-command-input')];
+    const updateCommands=()=>{
+      const address=(addressInput.value||'').trim();
+      const valid=!address || /^y[1-9A-HJ-NP-Za-km-z]{25,40}$/.test(address);
+      addressInput.style.borderColor=valid?'rgba(100,255,140,.35)':'#a84a4a';
+      addressMessage.textContent=!address
+        ?'Commands will update as you type.'
+        :valid
+          ?'Commands updated with your Yerbas address.'
+          :'This does not look like a valid Yerbas address yet.';
+      addressMessage.style.color=valid?'':'#ffaaaa';
+      commandInputs.forEach(input=>{
+        const template=input.dataset.template||input.value;
+        input.value=template.replaceAll('YOUR_YERB_ADDRESS',address||'YOUR_YERB_ADDRESS');
+      });
+    };
+    addressInput.addEventListener('input',updateCommands);
+    addressInput.addEventListener('paste',()=>setTimeout(updateCommands,0));
 
     section.querySelectorAll('.miner-copy-btn').forEach(btn=>{
       btn.addEventListener('click',()=>{
@@ -122,7 +151,7 @@
         if(input) copyText(input.value,btn);
       });
     });
-    section.querySelectorAll('.miner-command-input').forEach(input=>input.addEventListener('click',()=>input.select()));
+    commandInputs.forEach(input=>input.addEventListener('click',()=>input.select()));
   }
 
   function rejectBreakdown(items) {
