@@ -3,24 +3,26 @@ import base64
 import hashlib
 import hmac
 import json
+import sqlite3
 import time
+from decimal import Decimal
 from html import escape
 from http.server import ThreadingHTTPServer
 from urllib.parse import unquote, urlparse
 
 import web_stats as live
 from yerbpool.admin_settings import (
-    get_pool_fee_address,
+    YERB_ADDRESS_RE,
+    ensure_treasury_address,
     get_pool_fee_percent,
-    set_pool_fee_address,
+    get_treasury_address,
     set_pool_fee_percent,
 )
+from yerbpool.rpc import YerbasRPC
 
 
 CFG = live.base.CFG
-# Account pages need a live rolling estimate that is independent of partial
-# 5-minute chart buckets. The parent dashboard injects LUCK_SCRIPT into every
-# served index page, so append this small account-only enhancement there.
+COIN = 100_000_000
 live.base.LUCK_SCRIPT += '<script src="/account_live_hashrate.js?v=1"></script>'
 
 
@@ -60,11 +62,21 @@ def _authorized(header):
     )
 
 
+def _rpc():
+    return YerbasRPC(CFG["rpc"])
+
+
+def _treasury_address():
+    address = get_treasury_address(CFG)
+    if address:
+        return address
+    return ensure_treasury_address(CFG, _rpc())
+
+
 def _public_settings():
     payouts = CFG.get("payouts", {})
     return {
         "pool_fee_percent": get_pool_fee_percent(CFG),
-        "pool_fee_address": get_pool_fee_address(CFG),
         "coinbase_maturity": int(payouts.get("coinbase_maturity", 100)),
         "minimum_payout": str(payouts.get("minimum_payout", "1.00000000")),
         "check_interval_seconds": int(payouts.get("check_interval_seconds", 60)),
@@ -72,7 +84,6 @@ def _public_settings():
 
 
 def _account_hashrate(address):
-    """Rolling hashrate for one payout address from accepted shares."""
     cutoff = int(time.time()) - live.HASHRATE_WINDOW
     with live.base.db() as con:
         row = live.base.one(
@@ -101,9 +112,51 @@ def _account_hashrate(address):
     }
 
 
+def _ensure_treasury_history_table():
+    with live.base.db() as con:
+        con.execute(
+            """CREATE TABLE IF NOT EXISTS treasury_withdrawals (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                created_at INTEGER NOT NULL,
+                destination TEXT NOT NULL,
+                amount_atomic INTEGER NOT NULL,
+                txid TEXT,
+                status TEXT NOT NULL,
+                error TEXT
+            )"""
+        )
+        con.commit()
+
+
+def _treasury_snapshot():
+    _ensure_treasury_history_table()
+    address = _treasury_address()
+    rpc = _rpc()
+    try:
+        account = rpc.getaccount(address)
+    except Exception:
+        account = "YERB-Pool-Treasury"
+    try:
+        balance = float(rpc.getaccountbalance(account, 1, False))
+    except Exception:
+        balance = 0.0
+    with live.base.db() as con:
+        history = live.base.rows(
+            con,
+            "SELECT id,created_at,destination,amount_atomic,txid,status,error FROM treasury_withdrawals ORDER BY id DESC LIMIT 50",
+        )
+    return {
+        "address": address,
+        "account": account,
+        "balance": balance,
+        "history": history,
+    }
+
+
 def _admin_snapshot():
     data = _public_settings()
     data["summary"] = live.api_summary()
+    data["treasury"] = _treasury_snapshot()
     try:
         wallet = live.base.rpc_call("getwalletinfo")
         data["wallet"] = {
@@ -116,6 +169,40 @@ def _admin_snapshot():
     return data
 
 
+def _record_treasury_withdrawal(destination, amount_atomic, status, txid=None, error=None):
+    _ensure_treasury_history_table()
+    with live.base.db() as con:
+        con.execute(
+            "INSERT INTO treasury_withdrawals(created_at,destination,amount_atomic,txid,status,error) VALUES(?,?,?,?,?,?)",
+            (int(time.time()), destination, int(amount_atomic), txid, status, error),
+        )
+        con.commit()
+
+
+def _withdraw_treasury(destination, amount):
+    destination = str(destination or "").strip()
+    if not YERB_ADDRESS_RE.fullmatch(destination):
+        raise ValueError("destination must be a valid YERB address")
+    amount_dec = Decimal(str(amount))
+    if amount_dec <= 0:
+        raise ValueError("withdrawal amount must be greater than zero")
+
+    treasury = _treasury_snapshot()
+    balance_dec = Decimal(str(treasury["balance"]))
+    if amount_dec > balance_dec:
+        raise ValueError("treasury has insufficient funds")
+
+    rpc = _rpc()
+    amounts = {destination: float(amount_dec)}
+    try:
+        txid = str(rpc.sendmany(amounts, "YERB-Pool treasury withdrawal", treasury["account"]) or "")
+    except Exception as exc:
+        _record_treasury_withdrawal(destination, int(amount_dec * COIN), "failed", error=str(exc))
+        raise
+    _record_treasury_withdrawal(destination, int(amount_dec * COIN), "sent", txid=txid)
+    return txid
+
+
 def _admin_html():
     if not _admin_enabled():
         setup = "sudo -u yerbpool python3 /opt/yerb-pool/scripts/set-admin-password.py"
@@ -124,15 +211,19 @@ def _admin_html():
     return """<!doctype html>
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>YERB Pool Admin</title><link rel="stylesheet" href="/brand.css?v=1">
-<style>body{background:#111;color:#eee;font-family:system-ui,sans-serif;margin:0}main{max-width:1000px;margin:auto;padding:30px}.admin-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:14px}.admin-card{background:#1b1b1b;border:1px solid #303030;border-radius:10px;padding:18px}.admin-card strong{display:block;font-size:24px;margin-top:4px}.form-row{display:flex;gap:12px;align-items:end;flex-wrap:wrap}label{display:block;color:#aaa;font-size:13px;margin-bottom:6px}input{background:#111;color:#fff;border:1px solid #444;border-radius:7px;padding:10px 12px;font-size:16px;width:180px}#fee-address{width:min(540px,80vw);font-family:monospace}button{background:#2b7a3d;color:#fff;border:0;border-radius:7px;padding:11px 18px;font-weight:700;cursor:pointer}.notice{margin-top:12px;color:#9fe3a7}.error{color:#ffaaaa}.muted{color:#aaa}a{color:#9fd3ff}</style></head>
-<body><main><div style="display:flex;justify-content:space-between;align-items:center;gap:20px;flex-wrap:wrap"><div><h1 style="margin-bottom:4px">YERB Pool Admin</h1><div class="muted">Operational settings and pool status</div></div><a href="/">← Public dashboard</a></div>
+<style>body{background:#111;color:#eee;font-family:system-ui,sans-serif;margin:0}main{max-width:1100px;margin:auto;padding:30px}.admin-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:14px}.admin-card{background:#1b1b1b;border:1px solid #303030;border-radius:10px;padding:18px}.admin-card strong{display:block;font-size:24px;margin-top:4px}.form-row{display:flex;gap:12px;align-items:end;flex-wrap:wrap}label{display:block;color:#aaa;font-size:13px;margin-bottom:6px}input{background:#111;color:#fff;border:1px solid #444;border-radius:7px;padding:10px 12px;font-size:16px;width:200px}.wide{width:min(520px,80vw)}button{background:#2b7a3d;color:#fff;border:0;border-radius:7px;padding:11px 18px;font-weight:700;cursor:pointer}.notice{margin-top:12px;color:#9fe3a7}.error{color:#ffaaaa}.muted{color:#aaa}a{color:#9fd3ff}table{width:100%;border-collapse:collapse;margin-top:12px}th,td{padding:9px;border-bottom:1px solid #2d2d2d;text-align:left;font-size:13px}code{word-break:break-all}</style></head>
+<body><main><div style="display:flex;justify-content:space-between;align-items:center;gap:20px;flex-wrap:wrap"><div><h1 style="margin-bottom:4px">YERB Pool Admin</h1><div class="muted">Operational settings and pool treasury</div></div><a href="/">← Public dashboard</a></div>
 <section><h2>Pool status</h2><div class="admin-grid" id="status"><div class="admin-card">Loading…</div></div></section>
-<section><h2>Pool fee</h2><div class="admin-card"><div class="form-row"><div><label for="fee">Pool fee percent</label><input id="fee" type="number" min="0" max="100" step="0.01"></div><div><label for="fee-address">Pool fee address</label><input id="fee-address" type="text" autocomplete="off" spellcheck="false" placeholder="y... YERB address"></div><button id="save">Save pool fee</button></div><p class="muted">The percentage and fee address apply to the next block found. Pool fees are credited to this address as immature rewards, mature with the block, and then use the normal payout cycle. Existing block allocations are never recalculated.</p><div id="message"></div></div></section>
+<section><h2>Pool fee</h2><div class="admin-card"><div class="form-row"><div><label for="fee">Pool fee percent</label><input id="fee" type="number" min="0" max="100" step="0.01"></div><button id="save-fee">Save fee</button></div><p class="muted">Future pool fees are credited automatically to the internal Pool Treasury. Existing block allocations are never recalculated.</p><div id="fee-message"></div></div></section>
+<section><h2>Pool Treasury</h2><div class="admin-card"><div class="admin-grid"><div><span class="muted">Treasury Address</span><strong style="font-size:14px"><code id="treasury-address">—</code></strong></div><div><span class="muted">Spendable Balance</span><strong id="treasury-balance">0.00 YERB</strong></div></div><div class="form-row" style="margin-top:18px"><div><label for="withdraw-address">Withdraw to</label><input id="withdraw-address" class="wide" type="text" autocomplete="off" spellcheck="false" placeholder="Destination YERB address"></div><div><label for="withdraw-amount">Amount (YERB)</label><input id="withdraw-amount" type="number" min="0.00000001" step="0.00000001"></div><button id="withdraw">Withdraw</button></div><p class="muted">Withdrawals are signed and broadcast by the pool's Yerbas wallet. The treasury private key is never stored in the web application.</p><div id="withdraw-message"></div><div id="treasury-history"></div></div></section>
 <section><h2>Payout configuration</h2><div class="admin-grid" id="payouts"></div></section>
 <script>
-const coin=v=>Number(v||0).toFixed(2)+' YERB';
-async function load(){const r=await fetch('/api/admin/settings',{cache:'no-store'});if(!r.ok)throw new Error(await r.text());const x=await r.json();document.getElementById('fee').value=Number(x.pool_fee_percent||0).toFixed(2);document.getElementById('fee-address').value=x.pool_fee_address||'';const s=x.summary||{},w=x.wallet||{};document.getElementById('status').innerHTML=`<div class="admin-card"><span class="muted">Wallet Balance</span><strong>${coin(w.balance)}</strong></div><div class="admin-card"><span class="muted">Immature Wallet</span><strong>${coin(w.immature_balance)}</strong></div><div class="admin-card"><span class="muted">Active Workers</span><strong>${s.workers?.active_workers??0}</strong></div><div class="admin-card"><span class="muted">Pending Blocks</span><strong>${s.blocks?.pending??0}</strong></div><div class="admin-card"><span class="muted">Total Paid</span><strong>${coin(Number(s.payouts?.paid_atomic||0)/1e8)}</strong></div>`;document.getElementById('payouts').innerHTML=`<div class="admin-card"><span class="muted">Minimum Payout</span><strong>${x.minimum_payout} YERB</strong></div><div class="admin-card"><span class="muted">Payment Check</span><strong>${x.check_interval_seconds}s</strong></div><div class="admin-card"><span class="muted">Coinbase Maturity</span><strong>${x.coinbase_maturity} blocks</strong></div>`;}
-document.getElementById('save').onclick=async()=>{const message=document.getElementById('message');message.className='';message.textContent='Saving…';try{const fee=Number(document.getElementById('fee').value);const address=document.getElementById('fee-address').value.trim();if(fee>0&&!address)throw new Error('Enter a pool fee address when the pool fee is greater than 0%.');const r=await fetch('/api/admin/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({pool_fee_percent:fee,pool_fee_address:address})});const x=await r.json();if(!r.ok)throw new Error(x.error||'Save failed');message.className='notice';message.textContent=`Pool fee updated to ${Number(x.pool_fee_percent).toFixed(2)}% → ${x.pool_fee_address||'no fee address'}. Applies to the next block.`;await load();}catch(e){message.className='error';message.textContent=e.message;}};
+const coin=v=>Number(v||0).toFixed(8)+' YERB';
+const when=t=>t?new Date(Number(t)*1000).toLocaleString():'—';
+function renderHistory(items){if(!items?.length)return'<p class="muted">No treasury withdrawals yet.</p>';return `<table><thead><tr><th>Time</th><th>Destination</th><th>Amount</th><th>Status</th><th>TXID</th></tr></thead><tbody>${items.map(x=>`<tr><td>${when(x.created_at)}</td><td><code>${x.destination}</code></td><td>${(Number(x.amount_atomic||0)/1e8).toFixed(8)} YERB</td><td>${x.status}</td><td>${x.txid?`<code>${x.txid}</code>`:'—'}</td></tr>`).join('')}</tbody></table>`}
+async function load(){const r=await fetch('/api/admin/settings',{cache:'no-store'});if(!r.ok)throw new Error(await r.text());const x=await r.json();document.getElementById('fee').value=Number(x.pool_fee_percent||0).toFixed(2);const s=x.summary||{},w=x.wallet||{},t=x.treasury||{};document.getElementById('status').innerHTML=`<div class="admin-card"><span class="muted">Wallet Balance</span><strong>${Number(w.balance||0).toFixed(2)} YERB</strong></div><div class="admin-card"><span class="muted">Immature Wallet</span><strong>${Number(w.immature_balance||0).toFixed(2)} YERB</strong></div><div class="admin-card"><span class="muted">Active Workers</span><strong>${s.workers?.active_workers??0}</strong></div><div class="admin-card"><span class="muted">Pending Blocks</span><strong>${s.blocks?.pending??0}</strong></div><div class="admin-card"><span class="muted">Total Paid</span><strong>${(Number(s.payouts?.paid_atomic||0)/1e8).toFixed(2)} YERB</strong></div>`;document.getElementById('treasury-address').textContent=t.address||'—';document.getElementById('treasury-balance').textContent=coin(t.balance);document.getElementById('treasury-history').innerHTML=renderHistory(t.history);document.getElementById('payouts').innerHTML=`<div class="admin-card"><span class="muted">Minimum Payout</span><strong>${x.minimum_payout} YERB</strong></div><div class="admin-card"><span class="muted">Payment Check</span><strong>${x.check_interval_seconds}s</strong></div><div class="admin-card"><span class="muted">Coinbase Maturity</span><strong>${x.coinbase_maturity} blocks</strong></div>`;}
+document.getElementById('save-fee').onclick=async()=>{const message=document.getElementById('fee-message');message.className='';message.textContent='Saving…';try{const fee=Number(document.getElementById('fee').value);const r=await fetch('/api/admin/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({pool_fee_percent:fee})});const x=await r.json();if(!r.ok)throw new Error(x.error||'Save failed');message.className='notice';message.textContent=`Pool fee updated to ${Number(x.pool_fee_percent).toFixed(2)}%. Applies to the next block.`;await load();}catch(e){message.className='error';message.textContent=e.message;}};
+document.getElementById('withdraw').onclick=async()=>{const message=document.getElementById('withdraw-message');message.className='';message.textContent='Broadcasting withdrawal…';try{const destination=document.getElementById('withdraw-address').value.trim();const amount=document.getElementById('withdraw-amount').value;const r=await fetch('/api/admin/treasury/withdraw',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({destination,amount})});const x=await r.json();if(!r.ok)throw new Error(x.error||'Withdrawal failed');message.className='notice';message.textContent=`Withdrawal sent. TXID: ${x.txid}`;document.getElementById('withdraw-amount').value='';await load();}catch(e){message.className='error';message.textContent=e.message;}};
 load().catch(e=>{document.getElementById('status').innerHTML=`<div class="admin-card error">${e.message}</div>`});
 </script></main></body></html>"""
 
@@ -156,6 +247,10 @@ class AdminHandler(live.LiveHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _read_json(self):
+        length = min(max(int(self.headers.get("Content-Length", "0")), 0), 65536)
+        return json.loads(self.rfile.read(length).decode("utf-8") or "{}")
+
     def do_GET(self):
         path = urlparse(self.path).path
         if path.startswith("/api/account-hashrate/"):
@@ -177,37 +272,26 @@ class AdminHandler(live.LiveHandler):
 
     def do_POST(self):
         path = urlparse(self.path).path
-        if path != "/api/admin/settings":
-            return self.send_error(404)
         if not self._require_admin():
             return
         try:
-            length = min(max(int(self.headers.get("Content-Length", "0")), 0), 65536)
-            payload = json.loads(self.rfile.read(length).decode("utf-8") or "{}")
-            if "pool_fee_percent" not in payload and "pool_fee_address" not in payload:
-                return self.send_json({"error": "no pool fee setting supplied"}, 400)
-
-            if "pool_fee_percent" in payload:
+            payload = self._read_json()
+            if path == "/api/admin/settings":
+                if "pool_fee_percent" not in payload:
+                    return self.send_json({"error": "pool_fee_percent is required"}, 400)
                 set_pool_fee_percent(CFG, float(payload["pool_fee_percent"]), persist_config=True)
-            if "pool_fee_address" in payload:
-                set_pool_fee_address(CFG, payload["pool_fee_address"], persist_config=True)
-
-            fee = get_pool_fee_percent(CFG)
-            address = get_pool_fee_address(CFG)
-            if fee > 0 and not address:
-                return self.send_json({"error": "pool fee address is required when pool fee is greater than 0%"}, 400)
-
-            return self.send_json({
-                "ok": True,
-                "pool_fee_percent": fee,
-                "pool_fee_address": address,
-            })
-        except (ValueError, TypeError, json.JSONDecodeError) as exc:
+                return self.send_json({"ok": True, "pool_fee_percent": get_pool_fee_percent(CFG)})
+            if path == "/api/admin/treasury/withdraw":
+                txid = _withdraw_treasury(payload.get("destination"), payload.get("amount"))
+                return self.send_json({"ok": True, "txid": txid})
+            return self.send_error(404)
+        except (ValueError, TypeError, json.JSONDecodeError, ArithmeticError) as exc:
             return self.send_json({"error": str(exc)}, 400)
         except Exception as exc:
             return self.send_json({"error": str(exc)}, 500)
 
 
 if __name__ == "__main__":
+    _ensure_treasury_history_table()
     print(f"YERB Pool web/admin listening on http://{live.base.HOST}:{live.base.PORT}")
     ThreadingHTTPServer((live.base.HOST, live.base.PORT), AdminHandler).serve_forever()
