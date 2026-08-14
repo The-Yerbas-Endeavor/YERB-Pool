@@ -165,7 +165,7 @@
 
   window.renderBlocks = function(b){
     if(!b.length) return '<div class="empty">No blocks found yet.</div>';
-    return table(['Height','Status','Confirmations','Network Reward','Pool Reward','Hash'],b.map(x=>{const c=Number(x.confirmations||0);const label=x.status==='orphan'?'Orphan':c>=REQUIRED_CONFIRMATIONS?'Confirmed':'Pending';return `<tr><td>${x.height??'—'}</td><td>${status(label)}</td><td>${c} / ${REQUIRED_CONFIRMATIONS}</td><td>${coin(x.network_reward_atomic||8000000000)} YERB</td><td>${coin(x.reward_atomic)} YERB</td><td>${explorerBlock(x.block_hash)}</td></tr>`;}));
+    return table(['Height','Status','Confirmations','Pool Reward','Hash'],b.map(x=>{const c=Number(x.confirmations||0);const label=x.status==='orphan'?'Orphan':c>=REQUIRED_CONFIRMATIONS?'Confirmed':'Pending';return `<tr><td>${x.height??'—'}</td><td>${status(label)}</td><td>${c} / ${REQUIRED_CONFIRMATIONS}</td><td>${coin(x.reward_atomic)} YERB</td><td>${explorerBlock(x.block_hash)}</td></tr>`;}));
   };
 
   window.renderMiners = function(m){
