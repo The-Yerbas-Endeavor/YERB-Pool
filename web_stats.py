@@ -365,6 +365,10 @@ class LiveHandler(base.Handler):
                 "const cards=[['Miners / Active',`${s.accounts.accounts} / ${s.workers.active_workers}`,'/miners'],",
             )
             text = text.replace(
+                "['Blocks Found',s.blocks.blocks,'/blocks'],['Pending Blocks',s.blocks.pending,'/blocks/pending'],",
+                "['Blocks / Pending',`${s.blocks.blocks} / ${s.blocks.pending}`,'/blocks'],",
+            )
+            text = text.replace(
                 '<div class="metric"><span class="muted small">Rejected shares / 24h</span><strong>${rejected24.toLocaleString()}</strong></div>',
                 '<a class="metric" href="/miners" style="display:block;color:inherit;text-decoration:none"><span class="muted small">Miners / Active</span><strong>${s.accounts.accounts} / ${s.workers.active_workers}</strong></a>',
             )
