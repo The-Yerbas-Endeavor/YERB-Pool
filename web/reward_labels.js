@@ -40,7 +40,9 @@
     if(location.pathname!=='/') return;
     const main=document.querySelector('main#app');
     if(!main) return;
-    const heading=[...main.querySelectorAll('h1,h2,h3')].find(h=>h.textContent.trim().toLowerCase()==='pool activity');
+    const heading=[...main.querySelectorAll('h1,h2,h3')].find(h=>
+      h.textContent.trim().toLowerCase().startsWith('pool activity')
+    );
     const section=heading?.closest('section');
     if(section && main.firstElementChild!==section) main.prepend(section);
   }
