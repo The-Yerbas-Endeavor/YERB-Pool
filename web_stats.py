@@ -22,12 +22,7 @@ HASHRATE_WINDOW = 600
 
 @contextlib.contextmanager
 def _closed_db():
-    """Open the pool SQLite database and always close it after the request.
-
-    sqlite3.Connection's own context-manager commits/rolls back but does not
-    close the connection, which caused the dashboard to eventually exhaust
-    its file-descriptor limit under repeated API refreshes.
-    """
+    """Open the pool SQLite database and always close it after the request."""
     con = sqlite3.connect(base.DB_PATH)
     con.row_factory = sqlite3.Row
     try:
@@ -176,7 +171,8 @@ def api_pool_history(hours=24, bucket_seconds=300):
     return history
 
 
-def api_luck():
+def _recent_pool_hashrate():
+    """Return a resilient 10-minute hashrate estimate from accepted shares."""
     now = int(time.time())
     cutoff = now - HASHRATE_WINDOW
     with base.db() as con:
@@ -185,6 +181,18 @@ def api_luck():
             "SELECT COALESCE(SUM(difficulty),0) accepted_diff FROM shares WHERE accepted=1 AND ts>=?",
             (cutoff,),
         )
+    recent_diff = float(recent.get("accepted_diff") or 0)
+    return (
+        (recent_diff / base.GHOSTRIDER_TARGET_FACTOR)
+        * base.DIFF1_HASHES
+        / HASHRATE_WINDOW
+    )
+
+
+def api_luck():
+    now = int(time.time())
+    pool_hashrate = _recent_pool_hashrate()
+    with base.db() as con:
         last_block = base.one(con, "SELECT height,submitted_at FROM blocks ORDER BY id DESC LIMIT 1")
         if last_block and last_block.get("submitted_at"):
             round_start = int(last_block["submitted_at"])
@@ -197,20 +205,23 @@ def api_luck():
             (round_start,),
         )
 
-    recent_diff = float(recent.get("accepted_diff") or 0)
-    pool_hashrate = (
-        (recent_diff / base.GHOSTRIDER_TARGET_FACTOR)
-        * base.DIFF1_HASHES
-        / HASHRATE_WINDOW
-    )
-    network_diff = base.current_network_difficulty()
-    expected_stratum_diff = max(network_diff * base.GHOSTRIDER_TARGET_FACTOR, 1e-30)
-    round_diff = float(round_stats.get("accepted_diff") or 0)
-    effort_ratio = round_diff / expected_stratum_diff
+    # Hashrate reporting should survive a temporary wallet/mining RPC failure.
+    # Network-derived luck fields can be unavailable without zeroing hashrate.
+    try:
+        network_diff = base.current_network_difficulty()
+    except Exception:
+        network_diff = None
 
-    import math
-    chance = (1.0 - math.exp(-effort_ratio)) * 100.0
-    eta_seconds = network_diff * base.DIFF1_HASHES / pool_hashrate if pool_hashrate > 0 else None
+    round_diff = float(round_stats.get("accepted_diff") or 0)
+    effort_ratio = 0.0
+    chance = 0.0
+    eta_seconds = None
+    if network_diff is not None and float(network_diff) > 0:
+        expected_stratum_diff = max(float(network_diff) * base.GHOSTRIDER_TARGET_FACTOR, 1e-30)
+        effort_ratio = round_diff / expected_stratum_diff
+        import math
+        chance = (1.0 - math.exp(-effort_ratio)) * 100.0
+        eta_seconds = float(network_diff) * base.DIFF1_HASHES / pool_hashrate if pool_hashrate > 0 else None
 
     return {
         "pool_hashrate": pool_hashrate,
@@ -289,13 +300,15 @@ class LiveHandler(base.Handler):
                 '<div class="muted">Balance</div>',
                 '<div class="muted">Mature Balance</div>',
             )
-            # Home-page graphs used to aggregate only workers that happened to
-            # be active at render time. Replace that source with pool-wide
-            # history directly from the shares table so existing 24h data is
-            # always available after restarts/disconnects.
             text = text.replace(
                 "const active=w.filter(x=>x.active).slice(0,24);const stats=(await Promise.all(active.map(x=>get('/api/worker/'+x.id+'/stats?hours=24&bucket=300').catch(()=>null)))).filter(Boolean);const h=aggregateHistory(stats);",
                 "const h=await get('/api/pool/history?hours=24&bucket=300').catch(()=>[]);",
+            )
+            # Keep displayed current hashrate tied to the same pool-wide share
+            # stream as the graph instead of depending on worker active flags.
+            text = text.replace(
+                "const current=w.reduce((n,x)=>n+Number(x.active?x.hashrate:0),0);",
+                "const recentBuckets=h.slice(-2);const current=recentBuckets.length?recentBuckets.reduce((n,x)=>n+Number(x.hashrate||0),0)/recentBuckets.length:w.reduce((n,x)=>n+Number(x.active?x.hashrate:0),0);",
             )
             text = text.replace(
                 "Accepted GhostRider share work from currently tracked workers.",
@@ -307,7 +320,7 @@ class LiveHandler(base.Handler):
             )
             body = text.replace(
                 "</body>",
-                base.LUCK_SCRIPT + '<script src="/reward_labels.js?v=4"></script></body>',
+                base.LUCK_SCRIPT + '<script src="/reward_labels.js?v=5"></script></body>',
             ).encode()
         else:
             body = target.read_bytes()
