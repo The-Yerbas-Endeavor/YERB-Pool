@@ -9,7 +9,12 @@ from http.server import ThreadingHTTPServer
 from urllib.parse import unquote, urlparse
 
 import web_stats as live
-from yerbpool.admin_settings import get_pool_fee_percent, set_pool_fee_percent
+from yerbpool.admin_settings import (
+    get_pool_fee_address,
+    get_pool_fee_percent,
+    set_pool_fee_address,
+    set_pool_fee_percent,
+)
 
 
 CFG = live.base.CFG
@@ -59,6 +64,7 @@ def _public_settings():
     payouts = CFG.get("payouts", {})
     return {
         "pool_fee_percent": get_pool_fee_percent(CFG),
+        "pool_fee_address": get_pool_fee_address(CFG),
         "coinbase_maturity": int(payouts.get("coinbase_maturity", 100)),
         "minimum_payout": str(payouts.get("minimum_payout", "1.00000000")),
         "check_interval_seconds": int(payouts.get("check_interval_seconds", 60)),
@@ -66,7 +72,7 @@ def _public_settings():
 
 
 def _account_hashrate(address):
-    """Rolling 10-minute hashrate for one payout address from accepted shares."""
+    """Rolling hashrate for one payout address from accepted shares."""
     cutoff = int(time.time()) - live.HASHRATE_WINDOW
     with live.base.db() as con:
         row = live.base.one(
@@ -118,15 +124,15 @@ def _admin_html():
     return """<!doctype html>
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>YERB Pool Admin</title><link rel="stylesheet" href="/brand.css?v=1">
-<style>body{background:#111;color:#eee;font-family:system-ui,sans-serif;margin:0}main{max-width:1000px;margin:auto;padding:30px}.admin-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:14px}.admin-card{background:#1b1b1b;border:1px solid #303030;border-radius:10px;padding:18px}.admin-card strong{display:block;font-size:24px;margin-top:4px}.form-row{display:flex;gap:12px;align-items:end;flex-wrap:wrap}label{display:block;color:#aaa;font-size:13px;margin-bottom:6px}input{background:#111;color:#fff;border:1px solid #444;border-radius:7px;padding:10px 12px;font-size:16px;width:180px}button{background:#2b7a3d;color:#fff;border:0;border-radius:7px;padding:11px 18px;font-weight:700;cursor:pointer}.notice{margin-top:12px;color:#9fe3a7}.error{color:#ffaaaa}.muted{color:#aaa}a{color:#9fd3ff}</style></head>
+<style>body{background:#111;color:#eee;font-family:system-ui,sans-serif;margin:0}main{max-width:1000px;margin:auto;padding:30px}.admin-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:14px}.admin-card{background:#1b1b1b;border:1px solid #303030;border-radius:10px;padding:18px}.admin-card strong{display:block;font-size:24px;margin-top:4px}.form-row{display:flex;gap:12px;align-items:end;flex-wrap:wrap}label{display:block;color:#aaa;font-size:13px;margin-bottom:6px}input{background:#111;color:#fff;border:1px solid #444;border-radius:7px;padding:10px 12px;font-size:16px;width:180px}#fee-address{width:min(540px,80vw);font-family:monospace}button{background:#2b7a3d;color:#fff;border:0;border-radius:7px;padding:11px 18px;font-weight:700;cursor:pointer}.notice{margin-top:12px;color:#9fe3a7}.error{color:#ffaaaa}.muted{color:#aaa}a{color:#9fd3ff}</style></head>
 <body><main><div style="display:flex;justify-content:space-between;align-items:center;gap:20px;flex-wrap:wrap"><div><h1 style="margin-bottom:4px">YERB Pool Admin</h1><div class="muted">Operational settings and pool status</div></div><a href="/">← Public dashboard</a></div>
 <section><h2>Pool status</h2><div class="admin-grid" id="status"><div class="admin-card">Loading…</div></div></section>
-<section><h2>Pool fee</h2><div class="admin-card"><div class="form-row"><div><label for="fee">Pool fee percent</label><input id="fee" type="number" min="0" max="100" step="0.01"></div><button id="save">Save fee</button></div><p class="muted">The new fee applies to the next block found. Existing block allocations and miner balances are never recalculated.</p><div id="message"></div></div></section>
+<section><h2>Pool fee</h2><div class="admin-card"><div class="form-row"><div><label for="fee">Pool fee percent</label><input id="fee" type="number" min="0" max="100" step="0.01"></div><div><label for="fee-address">Pool fee address</label><input id="fee-address" type="text" autocomplete="off" spellcheck="false" placeholder="y... YERB address"></div><button id="save">Save pool fee</button></div><p class="muted">The percentage and fee address apply to the next block found. Pool fees are credited to this address as immature rewards, mature with the block, and then use the normal payout cycle. Existing block allocations are never recalculated.</p><div id="message"></div></div></section>
 <section><h2>Payout configuration</h2><div class="admin-grid" id="payouts"></div></section>
 <script>
 const coin=v=>Number(v||0).toFixed(2)+' YERB';
-async function load(){const r=await fetch('/api/admin/settings',{cache:'no-store'});if(!r.ok)throw new Error(await r.text());const x=await r.json();document.getElementById('fee').value=Number(x.pool_fee_percent||0).toFixed(2);const s=x.summary||{},w=x.wallet||{};document.getElementById('status').innerHTML=`<div class="admin-card"><span class="muted">Wallet Balance</span><strong>${coin(w.balance)}</strong></div><div class="admin-card"><span class="muted">Immature Wallet</span><strong>${coin(w.immature_balance)}</strong></div><div class="admin-card"><span class="muted">Active Workers</span><strong>${s.workers?.active_workers??0}</strong></div><div class="admin-card"><span class="muted">Pending Blocks</span><strong>${s.blocks?.pending??0}</strong></div><div class="admin-card"><span class="muted">Total Paid</span><strong>${coin(Number(s.payouts?.paid_atomic||0)/1e8)}</strong></div>`;document.getElementById('payouts').innerHTML=`<div class="admin-card"><span class="muted">Minimum Payout</span><strong>${x.minimum_payout} YERB</strong></div><div class="admin-card"><span class="muted">Payment Check</span><strong>${x.check_interval_seconds}s</strong></div><div class="admin-card"><span class="muted">Coinbase Maturity</span><strong>${x.coinbase_maturity} blocks</strong></div>`;}
-document.getElementById('save').onclick=async()=>{const message=document.getElementById('message');message.className='';message.textContent='Saving…';try{const fee=Number(document.getElementById('fee').value);const r=await fetch('/api/admin/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({pool_fee_percent:fee})});const x=await r.json();if(!r.ok)throw new Error(x.error||'Save failed');message.className='notice';message.textContent=`Pool fee updated to ${Number(x.pool_fee_percent).toFixed(2)}%. Applies to the next block.`;await load();}catch(e){message.className='error';message.textContent=e.message;}};
+async function load(){const r=await fetch('/api/admin/settings',{cache:'no-store'});if(!r.ok)throw new Error(await r.text());const x=await r.json();document.getElementById('fee').value=Number(x.pool_fee_percent||0).toFixed(2);document.getElementById('fee-address').value=x.pool_fee_address||'';const s=x.summary||{},w=x.wallet||{};document.getElementById('status').innerHTML=`<div class="admin-card"><span class="muted">Wallet Balance</span><strong>${coin(w.balance)}</strong></div><div class="admin-card"><span class="muted">Immature Wallet</span><strong>${coin(w.immature_balance)}</strong></div><div class="admin-card"><span class="muted">Active Workers</span><strong>${s.workers?.active_workers??0}</strong></div><div class="admin-card"><span class="muted">Pending Blocks</span><strong>${s.blocks?.pending??0}</strong></div><div class="admin-card"><span class="muted">Total Paid</span><strong>${coin(Number(s.payouts?.paid_atomic||0)/1e8)}</strong></div>`;document.getElementById('payouts').innerHTML=`<div class="admin-card"><span class="muted">Minimum Payout</span><strong>${x.minimum_payout} YERB</strong></div><div class="admin-card"><span class="muted">Payment Check</span><strong>${x.check_interval_seconds}s</strong></div><div class="admin-card"><span class="muted">Coinbase Maturity</span><strong>${x.coinbase_maturity} blocks</strong></div>`;}
+document.getElementById('save').onclick=async()=>{const message=document.getElementById('message');message.className='';message.textContent='Saving…';try{const fee=Number(document.getElementById('fee').value);const address=document.getElementById('fee-address').value.trim();if(fee>0&&!address)throw new Error('Enter a pool fee address when the pool fee is greater than 0%.');const r=await fetch('/api/admin/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({pool_fee_percent:fee,pool_fee_address:address})});const x=await r.json();if(!r.ok)throw new Error(x.error||'Save failed');message.className='notice';message.textContent=`Pool fee updated to ${Number(x.pool_fee_percent).toFixed(2)}% → ${x.pool_fee_address||'no fee address'}. Applies to the next block.`;await load();}catch(e){message.className='error';message.textContent=e.message;}};
 load().catch(e=>{document.getElementById('status').innerHTML=`<div class="admin-card error">${e.message}</div>`});
 </script></main></body></html>"""
 
@@ -178,11 +184,24 @@ class AdminHandler(live.LiveHandler):
         try:
             length = min(max(int(self.headers.get("Content-Length", "0")), 0), 65536)
             payload = json.loads(self.rfile.read(length).decode("utf-8") or "{}")
-            if "pool_fee_percent" not in payload:
-                return self.send_json({"error": "pool_fee_percent is required"}, 400)
-            fee = float(payload["pool_fee_percent"])
-            set_pool_fee_percent(CFG, fee, persist_config=True)
-            return self.send_json({"ok": True, "pool_fee_percent": get_pool_fee_percent(CFG)})
+            if "pool_fee_percent" not in payload and "pool_fee_address" not in payload:
+                return self.send_json({"error": "no pool fee setting supplied"}, 400)
+
+            if "pool_fee_percent" in payload:
+                set_pool_fee_percent(CFG, float(payload["pool_fee_percent"]), persist_config=True)
+            if "pool_fee_address" in payload:
+                set_pool_fee_address(CFG, payload["pool_fee_address"], persist_config=True)
+
+            fee = get_pool_fee_percent(CFG)
+            address = get_pool_fee_address(CFG)
+            if fee > 0 and not address:
+                return self.send_json({"error": "pool fee address is required when pool fee is greater than 0%"}, 400)
+
+            return self.send_json({
+                "ok": True,
+                "pool_fee_percent": fee,
+                "pool_fee_address": address,
+            })
         except (ValueError, TypeError, json.JSONDecodeError) as exc:
             return self.send_json({"error": str(exc)}, 400)
         except Exception as exc:
