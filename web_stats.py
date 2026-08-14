@@ -240,7 +240,7 @@ class LiveHandler(base.Handler):
             )
             body = text.replace(
                 "</body>",
-                base.LUCK_SCRIPT + '<script src="/reward_labels.js?v=2"></script></body>',
+                base.LUCK_SCRIPT + '<script src="/reward_labels.js?v=3"></script></body>',
             ).encode()
         else:
             body = target.read_bytes()
