@@ -154,6 +154,51 @@
     }
   }
 
+  function installLedgerTypeStyles(){
+    if(document.getElementById('yerb-ledger-type-styles')) return;
+    const style=document.createElement('style');
+    style.id='yerb-ledger-type-styles';
+    style.textContent=`
+      .ledger-type-badge{font-weight:700;border-width:1px!important}
+      .ledger-type-pending{color:#ffe066!important;background:rgba(255,224,102,.13)!important;border-color:rgba(255,224,102,.38)!important}
+      .ledger-type-mature{color:#8ee889!important;background:rgba(101,196,102,.14)!important;border-color:rgba(101,196,102,.40)!important}
+      .ledger-type-payout{color:#74c0fc!important;background:rgba(77,171,247,.14)!important;border-color:rgba(77,171,247,.40)!important}
+      .ledger-type-fee{color:#ffad66!important;background:rgba(255,159,67,.14)!important;border-color:rgba(255,159,67,.40)!important}
+      .ledger-type-reward{color:#ffd166!important;background:rgba(255,209,102,.14)!important;border-color:rgba(255,209,102,.40)!important}
+      .ledger-type-debit{color:#ff8787!important;background:rgba(255,107,107,.14)!important;border-color:rgba(255,107,107,.40)!important}
+      .ledger-type-orphan{color:#adb5bd!important;background:rgba(173,181,189,.12)!important;border-color:rgba(173,181,189,.32)!important}
+    `;
+    document.head.appendChild(style);
+  }
+
+  function colorLedgerTypes(){
+    if(!location.pathname.startsWith('/account/')) return;
+    const main=document.querySelector('main#app');
+    if(!main) return;
+    const heading=[...main.querySelectorAll('h2')].find(h=>h.textContent.trim()==='Ledger');
+    const section=heading?.closest('section');
+    if(!section) return;
+
+    installLedgerTypeStyles();
+    section.querySelectorAll('tbody tr').forEach(row=>{
+      const badge=row.querySelector('td:nth-child(2) .badge');
+      if(!badge) return;
+      const label=badge.textContent.trim().toLowerCase();
+      badge.classList.add('ledger-type-badge');
+      badge.classList.remove(
+        'ledger-type-pending','ledger-type-mature','ledger-type-payout',
+        'ledger-type-fee','ledger-type-reward','ledger-type-debit','ledger-type-orphan'
+      );
+      if(label.includes('orphan')) badge.classList.add('ledger-type-orphan');
+      else if(label.includes('pending') || label.includes('immature')) badge.classList.add('ledger-type-pending');
+      else if(label.includes('mature') || label.includes('credit')) badge.classList.add('ledger-type-mature');
+      else if(label.includes('payout')) badge.classList.add('ledger-type-payout');
+      else if(label.includes('fee')) badge.classList.add('ledger-type-fee');
+      else if(label.includes('reward')) badge.classList.add('ledger-type-reward');
+      else if(label.includes('debit')) badge.classList.add('ledger-type-debit');
+    });
+  }
+
   function groupHomePanels(){
     if(location.pathname!=='/') return;
     const main=document.querySelector('main#app');
@@ -182,14 +227,18 @@
     installAddressSearch();
     installHeaderConnect();
     groupHomePanels();
+    colorLedgerTypes();
 
-    if(location.pathname==='/'){
-      const main=document.querySelector('main#app');
-      if(main){
-        const observer=new MutationObserver(groupHomePanels);
-        observer.observe(main,{childList:true,subtree:true});
-        requestAnimationFrame(groupHomePanels);
-      }
+    const main=document.querySelector('main#app');
+    if(main && location.pathname==='/'){
+      const observer=new MutationObserver(groupHomePanels);
+      observer.observe(main,{childList:true,subtree:true});
+      requestAnimationFrame(groupHomePanels);
+    }
+    if(main && location.pathname.startsWith('/account/')){
+      const observer=new MutationObserver(colorLedgerTypes);
+      observer.observe(main,{childList:true,subtree:true});
+      requestAnimationFrame(colorLedgerTypes);
     }
   }
 
