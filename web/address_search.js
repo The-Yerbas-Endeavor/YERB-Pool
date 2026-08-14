@@ -30,6 +30,43 @@
     area.remove();
   }
 
+  function installBrandLogo(){
+    const brand=document.querySelector('.brand>div:first-child');
+    if(!brand || brand.querySelector('.yerbas-header-logo')) return;
+
+    if(!document.getElementById('yerbas-header-logo-style')){
+      const style=document.createElement('style');
+      style.id='yerbas-header-logo-style';
+      style.textContent=`
+        .brand>div:first-child:before{display:none!important;content:none!important}
+        .brand>div:first-child{position:relative!important;padding-left:66px!important}
+        .yerbas-header-logo{
+          position:absolute;
+          left:0;
+          top:-4px;
+          width:54px;
+          height:54px;
+          object-fit:contain;
+          display:block;
+          filter:drop-shadow(0 7px 12px rgba(0,0,0,.28));
+        }
+        @media(max-width:700px){
+          .brand>div:first-child{padding-left:56px!important}
+          .yerbas-header-logo{width:46px;height:46px;top:-2px}
+        }
+      `;
+      document.head.appendChild(style);
+    }
+
+    const logo=document.createElement('img');
+    logo.className='yerbas-header-logo';
+    logo.src='/yerbas-logo.svg';
+    logo.alt='Yerbas';
+    logo.width=54;
+    logo.height=54;
+    brand.prepend(logo);
+  }
+
   function installHeaderConnect(){
     if(document.getElementById('yerb-header-connect')) return;
     const header=document.querySelector('header .head');
@@ -141,6 +178,7 @@
   }
 
   function install(){
+    installBrandLogo();
     installAddressSearch();
     installHeaderConnect();
     groupHomePanels();
