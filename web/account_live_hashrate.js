@@ -1,4 +1,14 @@
 (function(){
+  // This script is already injected on every public page by web_admin.py.
+  // Use it as the stable global hook for the miner-address search UI.
+  if(!document.querySelector('script[data-yerb-address-search]')){
+    const script=document.createElement('script');
+    script.src='/address_search.js?v=1';
+    script.async=true;
+    script.dataset.yerbAddressSearch='1';
+    document.head.appendChild(script);
+  }
+
   if(!location.pathname.startsWith('/account/')) return;
 
   const address=decodeURIComponent(location.pathname.slice('/account/'.length));
