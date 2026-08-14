@@ -1,6 +1,6 @@
 import asyncio
 import logging
-from decimal import Decimal
+from decimal import Decimal, ROUND_DOWN
 
 from yerbpool.database import COIN
 
@@ -16,6 +16,10 @@ class PayoutManager:
         self.maturity_confirmations = max(1, int(pcfg.get("coinbase_maturity", 100)))
         self.minimum_atomic = int(Decimal(str(pcfg.get("minimum_payout", "1.0"))) * COIN)
         self.pool_fee_percent = float(pcfg.get("pool_fee_percent", 0.0))
+        self.fee_reserve_atomic = max(
+            0,
+            int(Decimal(str(pcfg.get("transaction_fee_reserve", "0.01"))) * COIN),
+        )
 
     async def start(self):
         asyncio.create_task(self._loop())
@@ -54,9 +58,60 @@ class PayoutManager:
                         block.get("height"), block["block_hash"], confirmations,
                     )
 
+    def _cap_accounts_to_wallet(self, accounts, wallet_atomic):
+        """Cap a payout batch to spendable wallet funds minus a fee reserve.
+
+        The reduction is proportional across eligible accounts so no one miner
+        absorbs the whole transaction-fee reserve. Any unpaid remainder stays in
+        account.balance_atomic and is eligible on a later payout cycle.
+        """
+        available = max(0, int(wallet_atomic) - self.fee_reserve_atomic)
+        total_due = sum(max(0, int(a.get("balance_atomic", 0))) for a in accounts)
+        if available <= 0 or total_due <= 0:
+            return []
+        if total_due <= available:
+            return [dict(a) for a in accounts]
+
+        ratio = Decimal(available) / Decimal(total_due)
+        capped = []
+        used = 0
+        fractions = []
+        for index, account in enumerate(accounts):
+            due = max(0, int(account.get("balance_atomic", 0)))
+            exact = Decimal(due) * ratio
+            amount = int(exact.to_integral_value(rounding=ROUND_DOWN))
+            row = dict(account)
+            row["balance_atomic"] = amount
+            capped.append(row)
+            used += amount
+            fractions.append((exact - Decimal(amount), index))
+
+        remainder = available - used
+        for _, index in sorted(fractions, reverse=True)[:remainder]:
+            capped[index]["balance_atomic"] += 1
+
+        return [a for a in capped if int(a.get("balance_atomic", 0)) > 0]
+
     async def process_payouts(self):
         accounts = self.db.eligible_payout_accounts(self.minimum_atomic)
         if not accounts:
+            return
+
+        try:
+            wallet = await asyncio.to_thread(self.rpc.getwalletinfo)
+            wallet_balance = Decimal(str((wallet or {}).get("balance", 0)))
+            wallet_atomic = int(wallet_balance * COIN)
+        except Exception:
+            logging.exception("Unable to read wallet balance before payout")
+            return
+
+        accounts = self._cap_accounts_to_wallet(accounts, wallet_atomic)
+        if not accounts:
+            logging.info(
+                "Payout deferred: wallet balance %.8f YERB does not exceed fee reserve %.8f YERB",
+                wallet_atomic / COIN,
+                self.fee_reserve_atomic / COIN,
+            )
             return
 
         payout_id = self.db.create_payout(accounts)
@@ -70,8 +125,12 @@ class PayoutManager:
         }
         total_atomic = sum(int(item["amount_atomic"]) for item in items)
         logging.info(
-            "Sending payout batch id=%s recipients=%s total=%.8f YERB",
-            payout_id, len(items), total_atomic / COIN,
+            "Sending payout batch id=%s recipients=%s total=%.8f YERB wallet=%.8f reserve=%.8f",
+            payout_id,
+            len(items),
+            total_atomic / COIN,
+            wallet_atomic / COIN,
+            self.fee_reserve_atomic / COIN,
         )
 
         self.db.mark_payout_broadcasting(payout_id)
@@ -82,11 +141,16 @@ class PayoutManager:
                 f"YERB-Pool payout #{payout_id}",
             )
         except Exception as exc:
-            self.db.mark_payout_uncertain(payout_id, exc)
-            logging.exception(
-                "Payout batch %s has uncertain broadcast state; manual reconciliation required",
-                payout_id,
-            )
+            message = str(exc).lower()
+            if "insufficient funds" in message or "invalid amount" in message or "invalid yerbas address" in message:
+                self.db.mark_payout_failed(payout_id, exc)
+                logging.exception("Payout batch %s failed before broadcast", payout_id)
+            else:
+                self.db.mark_payout_uncertain(payout_id, exc)
+                logging.exception(
+                    "Payout batch %s has uncertain broadcast state; manual reconciliation required",
+                    payout_id,
+                )
             return
 
         self.db.mark_payout_sent(payout_id, str(txid))
