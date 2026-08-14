@@ -417,9 +417,12 @@ class LiveHandler(base.Handler):
                 "Pool-wide GhostRider share work recorded during the last 24 hours.",
             )
 
-            # Prevent account/worker detail pages from tearing down and
-            # rebuilding their entire DOM on timers. Their live metric scripts
-            # update values in place instead.
+            # Keep all detail and dashboard DOM stable. Live values are updated
+            # by targeted scripts rather than rebuilding whole page sections.
+            text = text.replace(
+                "if(location.pathname==='/')setInterval(dashboard,10000);",
+                "",
+            )
             text = text.replace(
                 "if(location.pathname.startsWith('/worker/'))setInterval(worker,30000);",
                 "",
