@@ -13,6 +13,7 @@ from http.server import ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
 import web as base
+from yerbpool.admin_settings import get_pool_fee_percent
 
 
 COIN = 100_000_000
@@ -107,6 +108,8 @@ def api_summary():
         accounts["wallet_rpc_ok"] = False
 
     return {
+        "pool_address": str(base.CFG.get("pool_address", "") or ""),
+        "pool_fee_percent": get_pool_fee_percent(base.CFG),
         "accounts": accounts,
         "shares": shares,
         "workers": workers,
