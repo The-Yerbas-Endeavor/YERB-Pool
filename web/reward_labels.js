@@ -1,6 +1,5 @@
 (function(){
   const REQUIRED_CONFIRMATIONS = 100;
-  let rewardSummaryBusy = false;
   let workerRejectBusy = false;
   let accountRejectBusy = false;
 
@@ -93,10 +92,7 @@
     const connectHeading=[...main.querySelectorAll('h1,h2,h3')].find(h=>h.textContent.toLowerCase().includes('connect to yerb pool'));
     const connectSection=connectHeading?.closest('section');
     if(connectSection) connectSection.insertAdjacentElement('afterend',section);
-    else {
-      const reward=document.getElementById('reward-summary');
-      if(reward) reward.insertAdjacentElement('afterend',section); else main.appendChild(section);
-    }
+    else main.appendChild(section);
 
     section.querySelectorAll('.miner-copy-btn').forEach(btn=>{
       btn.addEventListener('click',()=>{
@@ -127,20 +123,6 @@
     return table(['Address','Workers','Accepted','Rejected','Mature Balance','Immature Balance','Total Paid'],m.map(x=>`<tr><td>${addressLink(x.address)}<div class="small">${explorerAddress(x.address)}</div></td><td><a href="/workers?address=${encodeURIComponent(x.address)}">${x.worker_count}</a></td><td>${x.accepted_shares||0}</td><td>${x.rejected_shares||0}</td><td>${coin(x.balance_atomic)} YERB</td><td>${coin(x.immature_balance_atomic)} YERB</td><td>${coin(x.total_paid_atomic)} YERB</td></tr>`));
   };
 
-  async function ensureRewardSummary(){
-    if(location.pathname!=='/' || rewardSummaryBusy || document.getElementById('reward-summary')) return;
-    const main=document.querySelector('main#app'); if(!main) return; rewardSummaryBusy=true;
-    try{
-      const [blocks,summary]=await Promise.all([get('/api/blocks?limit=10').catch(()=>[]),get('/api/summary').catch(()=>null)]);
-      if(!summary || location.pathname!=='/' || document.getElementById('reward-summary')) return;
-      const panel=document.createElement('section'); panel.id='reward-summary';
-      const first=main.querySelector('.grid'); if(first) first.insertAdjacentElement('afterend',panel); else main.appendChild(panel);
-      const network=blocks.length?Number(blocks[0].network_reward_atomic||8000000000):8000000000;
-      const pool=blocks.length?Number(blocks[0].reward_atomic||0):0;
-      panel.innerHTML=`<div class="section-head"><div><h2 style="margin-bottom:4px">Reward & Maturity</h2><div class="muted">Network reward includes required Yerbas coinbase payments; pool reward is the portion distributed to miners.</div></div><a href="/blocks">Blocks →</a></div><div class="metric-strip"><div class="metric"><span class="muted small">Network Block Reward</span><strong>${coin(network)} YERB</strong></div><div class="metric"><span class="muted small">Pool / Miner Reward</span><strong>${coin(pool)} YERB</strong></div><div class="metric"><span class="muted small">Coinbase Maturity</span><strong>${REQUIRED_CONFIRMATIONS} blocks</strong></div><div class="metric"><span class="muted small">Pending Miner Rewards</span><strong>${coin(summary.accounts.immature_atomic)} YERB</strong></div></div>`;
-    } finally { rewardSummaryBusy=false; }
-  }
-
   async function ensureWorkerRejectBreakdown(){
     if(!location.pathname.startsWith('/worker/') || workerRejectBusy || document.getElementById('worker-reject-breakdown')) return;
     const main=document.querySelector('main#app'); if(!main) return; workerRejectBusy=true;
@@ -154,7 +136,7 @@
   }
 
   const originalDashboard = window.dashboard;
-  window.dashboard = async function(){await originalDashboard();removeShareSummaryCards();movePoolActivityToTop();await ensureRewardSummary();ensureMinerCommands();movePoolActivityToTop();};
+  window.dashboard = async function(){await originalDashboard();removeShareSummaryCards();movePoolActivityToTop();ensureMinerCommands();movePoolActivityToTop();};
 
   const originalAccount = window.account;
   window.account = async function(){
@@ -170,7 +152,7 @@
   };
 
   const appRoot=document.querySelector('main#app');
-  if(appRoot){const observer=new MutationObserver(()=>{if(location.pathname==='/'){removeShareSummaryCards();movePoolActivityToTop();ensureRewardSummary();ensureMinerCommands();movePoolActivityToTop();} else if(location.pathname.startsWith('/worker/')){ensureWorkerRejectBreakdown();} else if(location.pathname.startsWith('/account/')){ensureAccountRejectBreakdown();}});observer.observe(appRoot,{childList:true,subtree:true});}
+  if(appRoot){const observer=new MutationObserver(()=>{if(location.pathname==='/'){removeShareSummaryCards();movePoolActivityToTop();ensureMinerCommands();movePoolActivityToTop();} else if(location.pathname.startsWith('/worker/')){ensureWorkerRejectBreakdown();} else if(location.pathname.startsWith('/account/')){ensureAccountRejectBreakdown();}});observer.observe(appRoot,{childList:true,subtree:true});}
 
   if(location.pathname==='/') window.dashboard();
   else if(location.pathname==='/miners') window.miners();
