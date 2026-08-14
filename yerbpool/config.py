@@ -32,9 +32,6 @@ def load_config(path=DEFAULT_PATH):
             f"Invalid rpc.url: {rpc.get('url')!r}. Expected a Yerbas daemon RPC endpoint such as {DEFAULT_RPC_URL}."
         )
 
-    # A public pool/dashboard hostname is almost certainly the web frontend,
-    # not the Yerbas daemon. Catch this early instead of allowing mining,
-    # maturity checks, and payouts to fail later with HTTP 500 responses.
     if host not in ("127.0.0.1", "localhost", "::1"):
         raise SystemExit(
             f"Unsafe rpc.url host: {host}. The pool should normally connect directly to the local Yerbas daemon. "
@@ -60,6 +57,7 @@ def load_config(path=DEFAULT_PATH):
     payouts.setdefault("check_interval_seconds", 60)
     payouts.setdefault("minimum_payout", "1.00000000")
     payouts.setdefault("pool_fee_percent", 0.0)
+    payouts.setdefault("transaction_fee_reserve", "0.01000000")
 
     cfg.setdefault("template_refresh_seconds", 5)
     cfg.setdefault("log_level", "INFO")
