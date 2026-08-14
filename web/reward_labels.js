@@ -2,6 +2,7 @@
   const REQUIRED_CONFIRMATIONS = 100;
   let workerRejectBusy = false;
   let accountRejectBusy = false;
+  let homeMinersBusy = false;
 
   function friendlyLedgerType(type) {
     const labels = {
@@ -44,6 +45,26 @@
     );
     const section=heading?.closest('section');
     if(section && main.firstElementChild!==section) main.prepend(section);
+  }
+
+  async function ensureHomeMiners(){
+    if(location.pathname!=='/' || homeMinersBusy) return;
+    const main=document.querySelector('main#app');
+    if(!main) return;
+    const existing=[...main.querySelectorAll('h2')].find(h=>h.textContent.trim()==='Miners');
+    if(existing) return;
+    homeMinersBusy=true;
+    try{
+      const miners=await get('/api/miners?limit=10').catch(()=>[]);
+      if([...main.querySelectorAll('h2')].some(h=>h.textContent.trim()==='Miners')) return;
+      const section=document.createElement('section');
+      section.innerHTML=`<div class="section-head"><h2>Miners</h2><a href="/miners">View all →</a></div>${renderMiners(miners)}`;
+      const recent=[...main.querySelectorAll('h2')].find(h=>h.textContent.trim()==='Recent Blocks')?.closest('section');
+      if(recent) recent.insertAdjacentElement('afterend',section);
+      else main.appendChild(section);
+    } finally {
+      homeMinersBusy=false;
+    }
   }
 
   function copyText(text, button) {
@@ -136,7 +157,14 @@
   }
 
   const originalDashboard = window.dashboard;
-  window.dashboard = async function(){await originalDashboard();removeShareSummaryCards();movePoolActivityToTop();ensureMinerCommands();movePoolActivityToTop();};
+  window.dashboard = async function(){
+    await originalDashboard();
+    removeShareSummaryCards();
+    movePoolActivityToTop();
+    await ensureHomeMiners();
+    ensureMinerCommands();
+    movePoolActivityToTop();
+  };
 
   const originalAccount = window.account;
   window.account = async function(){
@@ -152,9 +180,11 @@
   };
 
   const appRoot=document.querySelector('main#app');
-  if(appRoot){const observer=new MutationObserver(()=>{if(location.pathname==='/'){removeShareSummaryCards();movePoolActivityToTop();ensureMinerCommands();movePoolActivityToTop();} else if(location.pathname.startsWith('/worker/')){ensureWorkerRejectBreakdown();} else if(location.pathname.startsWith('/account/')){ensureAccountRejectBreakdown();}});observer.observe(appRoot,{childList:true,subtree:true});}
+  if(appRoot){const observer=new MutationObserver(()=>{if(location.pathname==='/'){removeShareSummaryCards();movePoolActivityToTop();ensureHomeMiners();ensureMinerCommands();movePoolActivityToTop();} else if(location.pathname.startsWith('/worker/')){ensureWorkerRejectBreakdown();} else if(location.pathname.startsWith('/account/')){ensureAccountRejectBreakdown();}});observer.observe(appRoot,{childList:true,subtree:true});}
 
-  if(location.pathname==='/') window.dashboard();
+  if(location.pathname==='/') {
+    window.dashboard().then(()=>requestAnimationFrame(()=>ensureHomeMiners()));
+  }
   else if(location.pathname==='/miners') window.miners();
   else if(location.pathname==='/blocks' || location.pathname==='/blocks/pending') window.blocks();
   else if(location.pathname==='/shares') window.shares();
