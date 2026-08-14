@@ -106,7 +106,13 @@ def api_summary():
     else:
         accounts["wallet_rpc_ok"] = False
 
-    return {"accounts": accounts, "shares": shares, "workers": workers, "blocks": blocks, "payouts": payouts}
+    return {
+        "accounts": accounts,
+        "shares": shares,
+        "workers": workers,
+        "blocks": blocks,
+        "payouts": payouts,
+    }
 
 
 def api_workers(limit=500):
@@ -221,12 +227,14 @@ def api_pool_history(hours=24, bucket_seconds=300):
     while t <= end:
         row = by_bucket.get(t, {})
         accepted_diff = float(row.get("accepted_diff") or 0)
-        history.append({
-            "ts": t,
-            "hashrate": _hashrate_from_diff(accepted_diff, bucket_seconds),
-            "accepted": int(row.get("accepted") or 0),
-            "rejected": int(row.get("rejected") or 0),
-        })
+        history.append(
+            {
+                "ts": t,
+                "hashrate": _hashrate_from_diff(accepted_diff, bucket_seconds),
+                "accepted": int(row.get("accepted") or 0),
+                "rejected": int(row.get("rejected") or 0),
+            }
+        )
         t += bucket_seconds
     return history
 
@@ -247,11 +255,17 @@ def api_luck():
     now = int(time.time())
     pool_hashrate = _recent_pool_hashrate()
     with base.db() as con:
-        last_block = base.one(con, "SELECT height,submitted_at FROM blocks ORDER BY id DESC LIMIT 1")
+        last_block = base.one(
+            con,
+            "SELECT height,submitted_at FROM blocks ORDER BY id DESC LIMIT 1",
+        )
         if last_block and last_block.get("submitted_at"):
             round_start = int(last_block["submitted_at"])
         else:
-            first = base.one(con, "SELECT MIN(ts) first_ts FROM shares WHERE accepted=1")
+            first = base.one(
+                con,
+                "SELECT MIN(ts) first_ts FROM shares WHERE accepted=1",
+            )
             round_start = int(first.get("first_ts") or now)
         round_stats = base.one(
             con,
@@ -269,11 +283,19 @@ def api_luck():
     chance = 0.0
     eta_seconds = None
     if network_diff is not None and float(network_diff) > 0:
-        expected_stratum_diff = max(float(network_diff) * base.GHOSTRIDER_TARGET_FACTOR, 1e-30)
+        expected_stratum_diff = max(
+            float(network_diff) * base.GHOSTRIDER_TARGET_FACTOR,
+            1e-30,
+        )
         effort_ratio = round_diff / expected_stratum_diff
         import math
+
         chance = (1.0 - math.exp(-effort_ratio)) * 100.0
-        eta_seconds = float(network_diff) * base.DIFF1_HASHES / pool_hashrate if pool_hashrate > 0 else None
+        eta_seconds = (
+            float(network_diff) * base.DIFF1_HASHES / pool_hashrate
+            if pool_hashrate > 0
+            else None
+        )
 
     return {
         "pool_hashrate": pool_hashrate,
@@ -304,7 +326,11 @@ def api_shares(status=None, address=None, limit=250):
 
     with base.db() as con:
         columns = {row[1] for row in con.execute("PRAGMA table_info(shares)")}
-        reason_expr = "s.rejection_reason" if "rejection_reason" in columns else "NULL AS rejection_reason"
+        reason_expr = (
+            "s.rejection_reason"
+            if "rejection_reason" in columns
+            else "NULL AS rejection_reason"
+        )
         sql = f"""SELECT s.id,s.ts,s.worker,s.worker_id,s.job_id,s.difficulty,s.accepted,
                          s.block_candidate,s.hash,{reason_expr},a.address
                   FROM shares s LEFT JOIN accounts a ON a.id=s.account_id"""
@@ -364,22 +390,33 @@ class LiveHandler(base.Handler):
                 "const cards=[['Miners',s.accounts.accounts,'/miners'],['Active Workers',s.workers.active_workers,'/workers'],",
                 "const cards=[['Miners / Active',`${s.accounts.accounts} / ${s.workers.active_workers}`,'/miners'],",
             )
+            # Blocks / Pending now lives in the Pool Activity strip, so remove
+            # the duplicate dashboard card entirely.
             text = text.replace(
                 "['Blocks Found',s.blocks.blocks,'/blocks'],['Pending Blocks',s.blocks.pending,'/blocks/pending'],",
-                "['Blocks / Pending',`${s.blocks.blocks} / ${s.blocks.pending}`,'/blocks'],",
+                "",
             )
             text = text.replace(
                 '<div class="metric"><span class="muted small">Rejected shares / 24h</span><strong>${rejected24.toLocaleString()}</strong></div>',
                 '<a class="metric" href="/miners" style="display:block;color:inherit;text-decoration:none"><span class="muted small">Miners / Active</span><strong>${s.accounts.accounts} / ${s.workers.active_workers}</strong></a>',
             )
+            text = text.replace(
+                '<div class="metric"><span class="muted small">24h peak hashrate</span><strong>${hashRate(peak)}</strong></div>',
+                '<a class="metric" href="/blocks" style="display:block;color:inherit;text-decoration:none"><span class="muted small">Blocks / Pending</span><strong>${s.blocks.blocks} / ${s.blocks.pending}</strong></a>',
+            )
+
             # Worker/account detail pages must use canonical API values rather
             # than averaging the latest graph buckets.
             old_latest = "latest=h.slice(-2).reduce((s,v)=>s+Number(v.hashrate||0),0)/Math.max(1,Math.min(2,h.length))"
-            text = text.replace(old_latest, "latest=Number(x.hashrate||x.combined_hashrate||0)")
+            text = text.replace(
+                old_latest,
+                "latest=Number(x.hashrate||x.combined_hashrate||0)",
+            )
             text = text.replace(
                 "Accepted GhostRider share work from currently tracked workers.",
                 "Pool-wide GhostRider share work recorded during the last 24 hours.",
             )
+
             # Prevent account/worker detail pages from tearing down and
             # rebuilding their entire DOM on timers. Their live metric scripts
             # update values in place instead.
@@ -397,10 +434,12 @@ class LiveHandler(base.Handler):
             )
             body = text.replace(
                 "</body>",
-                base.LUCK_SCRIPT + '<script src="/reward_labels.js?v=6"></script></body>',
+                base.LUCK_SCRIPT
+                + '<script src="/reward_labels.js?v=6"></script></body>',
             ).encode()
         else:
             body = target.read_bytes()
+
         self.send_response(200)
         self.send_header(
             "Content-Type",
@@ -413,5 +452,8 @@ class LiveHandler(base.Handler):
 
 
 if __name__ == "__main__":
-    print(f"YERB Pool web listening on http://{base.HOST}:{base.PORT} (standardized live metrics)")
+    print(
+        f"YERB Pool web listening on http://{base.HOST}:{base.PORT} "
+        "(standardized live metrics)"
+    )
     ThreadingHTTPServer((base.HOST, base.PORT), LiveHandler).serve_forever()
