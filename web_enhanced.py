@@ -20,6 +20,11 @@ from yerbpool.diagnostics import accounting_integrity, read_payout_status
 ROOT = Path(__file__).resolve().parent
 _base_summary = admin.live.api_summary
 _base_public_settings = admin._public_settings
+_health_cache = None
+_health_cache_at = 0.0
+_pool_cache = None
+_pool_cache_at = 0.0
+CACHE_SECONDS = 10.0
 
 # LiveHandler injects LUCK_SCRIPT into the existing page. Appending one script
 # here avoids modifying the working dashboard renderer or admin implementation.
@@ -144,7 +149,12 @@ def _database_health():
         return {"online": False, "error": str(exc)[:200]}
 
 
-def api_health():
+def api_health(force=False):
+    global _health_cache, _health_cache_at
+    now_mono = time.monotonic()
+    if not force and _health_cache is not None and now_mono - _health_cache_at < CACHE_SECONDS:
+        return _health_cache
+
     stratum_online, stratum_latency = _stratum_online()
     wallet = _wallet_health()
     database = _database_health()
@@ -155,7 +165,7 @@ def api_health():
 
     payout = read_payout_status(ROOT)
     ok = bool(stratum_online and wallet.get("online") and database.get("online"))
-    return {
+    result = {
         "ok": ok,
         "checked_at": int(time.time()),
         "stratum": {
@@ -168,16 +178,24 @@ def api_health():
         "accounting": integrity,
         "payout_scheduler": payout,
     }
+    _health_cache = result
+    _health_cache_at = now_mono
+    return result
 
 
-def api_pool():
+def api_pool(force=False):
+    global _pool_cache, _pool_cache_at
+    now_mono = time.monotonic()
+    if not force and _pool_cache is not None and now_mono - _pool_cache_at < CACHE_SECONDS:
+        return _pool_cache
+
     summary = public_summary()
     luck = admin.live.api_luck()
     payout_cfg = effective_public_settings()
     payout_status = read_payout_status(ROOT)
     interval = int(payout_status.get("interval_seconds") or payout_cfg.get("check_interval_seconds", 7200))
 
-    return {
+    result = {
         "name": "YERB Pool",
         "algorithm": "GhostRider",
         "stratum": "stratum+tcp://pool.yerbas.org:3333",
@@ -195,6 +213,9 @@ def api_pool():
         "pending_blocks": int(summary.get("blocks", {}).get("pending") or 0),
         "total_paid_atomic": int(summary.get("payouts", {}).get("paid_atomic") or 0),
     }
+    _pool_cache = result
+    _pool_cache_at = now_mono
+    return result
 
 
 class EnhancedHandler(admin.AdminHandler):
