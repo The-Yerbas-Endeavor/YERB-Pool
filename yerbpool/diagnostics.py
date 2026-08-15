@@ -1,6 +1,6 @@
 """Read-only diagnostics for the YERB Pool.
 
-Nothing in this module mutates pool accounting.  It is intentionally kept
+Nothing in this module mutates pool accounting. It is intentionally kept
 separate from mining, block allocation, payout, and treasury write paths so
 health checks cannot change balances.
 """
@@ -8,6 +8,7 @@ health checks cannot change balances.
 import json
 import sqlite3
 import time
+from contextlib import closing
 from pathlib import Path
 
 
@@ -29,7 +30,7 @@ def read_payout_status(root):
 
 def accounting_integrity(db_path):
     """Reconcile stored account counters against their immutable ledger history."""
-    with _connect(db_path) as con:
+    with closing(_connect(db_path)) as con:
         totals = con.execute(
             """SELECT
                  COUNT(*) AS accounts,
@@ -67,12 +68,6 @@ def accounting_integrity(db_path):
                  COALESCE(SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END),0) AS failed
                FROM payouts"""
         ).fetchone()
-
-        orphaned_pending = con.execute(
-            """SELECT COUNT(*)
-               FROM blocks
-               WHERE status='orphan' AND confirmations>=0"""
-        ).fetchone()[0]
 
     stored_mature = int(totals["stored_mature"] or 0)
     stored_immature = int(totals["stored_immature"] or 0)
@@ -118,5 +113,4 @@ def accounting_integrity(db_path):
             "broadcasting": int(payout_state["broadcasting"] or 0),
             "failed": int(payout_state["failed"] or 0),
         },
-        "orphaned_nonnegative_confirmations": int(orphaned_pending or 0),
     }
