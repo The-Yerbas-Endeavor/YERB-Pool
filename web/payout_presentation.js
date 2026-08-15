@@ -20,9 +20,10 @@
   }
 
   function payoutBadge(value){
-    const status=String(value||'').toLowerCase();
+    const valueText=String(value||'pending');
+    const status=valueText.toLowerCase();
     const cls=['sent','pending','broadcasting','failed','uncertain'].includes(status)?status:'pending';
-    return `<span class="payout-status payout-status-${cls}">${esc(value||'pending')}</span>`;
+    return `<span class="payout-status payout-status-${cls}">${esc(valueText)}</span>`;
   }
 
   function age(ts){
@@ -34,16 +35,37 @@
     return `${Math.floor(seconds/86400)}d ago`;
   }
 
-  function findHomeMinersSection(){
-    const row=document.getElementById('home-panel-row');
+  function homeRow(){
+    return document.getElementById('home-panel-row');
+  }
+
+  function findTargetSection(){
+    const row=homeRow();
     if(!row) return null;
-    const heading=[...row.querySelectorAll('h2')].find(h=>h.textContent.trim()==='Miners');
-    return heading?.closest('section')||null;
+
+    const payoutHeading=[...row.querySelectorAll('h2')].find(h=>h.textContent.trim()==='Recent Payouts');
+    if(payoutHeading) return payoutHeading.closest('section');
+
+    const minerHeading=[...row.querySelectorAll('h2')].find(h=>h.textContent.trim()==='Miners');
+    return minerHeading?.closest('section')||null;
+  }
+
+  function removeExtraHomePayoutSections(keep){
+    const main=document.querySelector('main#app');
+    const row=homeRow();
+    if(!main || !row) return;
+
+    const sections=[...main.querySelectorAll(':scope > section')];
+    for(const section of sections){
+      if(section===keep || row.contains(section)) continue;
+      const heading=section.querySelector('h2');
+      if(heading && heading.textContent.trim()==='Recent Payouts') section.remove();
+    }
   }
 
   async function render(){
     if(busy || location.pathname!=='/') return;
-    const section=findHomeMinersSection();
+    const section=findTargetSection();
     if(!section) return;
     busy=true;
     try{
@@ -55,6 +77,7 @@
         ? table(['Batch','Status','Total','Recipients','Age'],payouts.slice(0,5).map(p=>`<tr><td><a href="/payouts#${encodeURIComponent(p.id)}">#${p.id}</a></td><td>${payoutBadge(p.status)}</td><td>${coin(p.total_atomic)} YERB</td><td>${Number(p.recipient_count||0).toLocaleString()}</td><td class="payout-age">${age(p.sent_at||p.created_at)}</td></tr>`))
         : '<div class="empty">No payouts yet.</div>';
       section.innerHTML=`<div class="section-head"><h2>Recent Payouts</h2><a href="/payouts">View all →</a></div>${body}`;
+      removeExtraHomePayoutSections(section);
     }finally{
       busy=false;
     }
@@ -62,12 +85,16 @@
 
   async function install(){
     ensureStyles();
-    for(let i=0;i<20;i++){
-      if(findHomeMinersSection()) break;
-      await new Promise(r=>setTimeout(r,150));
+    for(let i=0;i<30;i++){
+      if(findTargetSection()) break;
+      await new Promise(r=>setTimeout(r,100));
     }
     render();
-    setInterval(render,15000);
+
+    // The legacy dashboard renderer may recreate a Miners section after a
+    // refresh. Re-enforce the intended Top Workers / Recent Blocks /
+    // Recent Payouts row quickly and without redrawing the whole dashboard.
+    setInterval(render,1000);
   }
 
   if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',install);
