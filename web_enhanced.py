@@ -122,7 +122,7 @@ def api_blocks_enhanced(status=None, limit=100):
 
 
 def api_payouts_enhanced(limit=100):
-    """Return payout batches with the actual number of miner recipients."""
+    """Return at most 100 payout batches with the actual miner recipient count."""
     with admin.live.base.db() as con:
         return admin.live.base.rows(
             con,
@@ -135,7 +135,7 @@ def api_payouts_enhanced(limit=100):
                GROUP BY p.id
                ORDER BY p.id DESC
                LIMIT ?""",
-            (min(max(int(limit), 1), 500),),
+            (min(max(int(limit), 1), 100),),
         )
 
 
