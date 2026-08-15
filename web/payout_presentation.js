@@ -12,9 +12,15 @@
       .payout-status-sent{color:#8ee889;background:rgba(101,196,102,.13);border-color:rgba(101,196,102,.38)}
       .payout-status-pending,.payout-status-broadcasting{color:#ffe066;background:rgba(255,224,102,.12);border-color:rgba(255,224,102,.36)}
       .payout-status-failed,.payout-status-uncertain{color:#ff8787;background:rgba(255,107,107,.12);border-color:rgba(255,107,107,.36)}
+      #home-panel-row .recent-payouts-card{display:flex;flex-direction:column;height:100%}
+      #home-panel-row .recent-payouts-card .payout-summary{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin:10px 0 4px}
+      #home-panel-row .recent-payouts-card .payout-summary-item{padding:8px 9px;border:1px solid rgba(101,196,102,.20);border-radius:7px;background:rgba(101,196,102,.04)}
+      #home-panel-row .recent-payouts-card .payout-summary-item span{display:block;color:#91a394;font-size:10px;margin-bottom:2px}
+      #home-panel-row .recent-payouts-card .payout-summary-item strong{font-size:13px;color:#e9f7ea}
+      #home-panel-row .recent-payouts-card .table-wrap{flex:1}
       #home-panel-row .recent-payouts-card table th,
-      #home-panel-row .recent-payouts-card table td{padding:8px 6px;font-size:12px}
-      #home-panel-row .recent-payouts-card .payout-age{color:#91a394;font-size:11px;white-space:nowrap}
+      #home-panel-row .recent-payouts-card table td{padding:5px 6px;font-size:11px}
+      #home-panel-row .recent-payouts-card .payout-age{color:#91a394;font-size:10px;white-space:nowrap}
       .home-miners-compat-marker{display:none!important}
     `;
     document.head.appendChild(style);
@@ -80,15 +86,25 @@
     if(!section) return;
     busy=true;
     try{
-      const payouts=await get('/api/payouts?limit=5').catch(()=>[]);
+      const payouts=await get('/api/payouts?limit=10').catch(()=>[]);
       if(!document.body.contains(section)) return;
       ensureStyles();
       section.classList.add('recent-payouts-card');
-      const body=payouts.length
-        ? table(['Batch','Status','Total','Recipients','Age'],payouts.slice(0,5).map(p=>`<tr><td><a href="/payouts#${encodeURIComponent(p.id)}">#${p.id}</a></td><td>${payoutBadge(p.status)}</td><td>${coin(p.total_atomic)} YERB</td><td>${Number(p.recipient_count||0).toLocaleString()}</td><td class="payout-age">${age(p.sent_at||p.created_at)}</td></tr>`))
+
+      const shown=payouts.slice(0,10);
+      const now=Math.floor(Date.now()/1000);
+      const last24=shown.filter(p=>Number(p.sent_at||p.created_at||0)>=now-86400 && String(p.status||'').toLowerCase()==='sent');
+      const paid24=last24.reduce((n,p)=>n+Number(p.total_atomic||0),0);
+      const recipients24=last24.reduce((n,p)=>n+Number(p.recipient_count||0),0);
+      const avg24=last24.length?paid24/last24.length:0;
+
+      const summary=`<div class="payout-summary"><div class="payout-summary-item"><span>Paid / 24h</span><strong>${coin(paid24)} YERB</strong></div><div class="payout-summary-item"><span>Batches / 24h</span><strong>${last24.length.toLocaleString()}</strong></div><div class="payout-summary-item"><span>Recipients / 24h</span><strong>${recipients24.toLocaleString()}</strong></div><div class="payout-summary-item"><span>Average batch</span><strong>${coin(avg24)} YERB</strong></div></div>`;
+
+      const body=shown.length
+        ? table(['Batch','Status','Total','Recipients','Age'],shown.map(p=>`<tr><td><a href="/payouts#${encodeURIComponent(p.id)}">#${p.id}</a></td><td>${payoutBadge(p.status)}</td><td>${coin(p.total_atomic)} YERB</td><td>${Number(p.recipient_count||0).toLocaleString()}</td><td class="payout-age">${age(p.sent_at||p.created_at)}</td></tr>`))
         : '<div class="empty">No payouts yet.</div>';
 
-      section.innerHTML=`<h2 class="home-miners-compat-marker" aria-hidden="true">Miners</h2><div class="section-head"><h2>Recent Payouts</h2><a href="/payouts">View all →</a></div>${body}`;
+      section.innerHTML=`<h2 class="home-miners-compat-marker" aria-hidden="true">Miners</h2><div class="section-head"><h2>Recent Payouts</h2><a href="/payouts">View all →</a></div>${summary}${body}`;
       enforceThreeCardRow(section);
     }finally{
       busy=false;
