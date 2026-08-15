@@ -2,15 +2,15 @@
 """Additive health/diagnostics layer for the existing YERB Pool dashboard.
 
 This wrapper deliberately reuses the production AdminHandler unchanged for all
-existing routes and POST actions. Only new read-only GET endpoints and a small
-public status script are added here.
+existing routes and POST actions. Only new read-only GET endpoints and small
+public presentation enhancements are added here.
 """
 
 import socket
 import time
 from http.server import ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 import web_admin as admin
 from yerbpool.admin_settings import get_pool_fee_percent, get_treasury_address
@@ -26,10 +26,12 @@ _pool_cache = None
 _pool_cache_at = 0.0
 CACHE_SECONDS = 10.0
 
-# LiveHandler injects LUCK_SCRIPT into the existing page. Appending one script
-# here avoids modifying the working dashboard renderer or admin implementation.
+# LiveHandler injects LUCK_SCRIPT into the existing page. Appending scripts here
+# avoids modifying the working dashboard renderer or admin implementation.
 if "/pool_status.js" not in admin.live.base.LUCK_SCRIPT:
-    admin.live.base.LUCK_SCRIPT += '<script src="/pool_status.js?v=1"></script>'
+    admin.live.base.LUCK_SCRIPT += '<script src="/pool_status.js?v=2"></script>'
+if "/block_presentation.js" not in admin.live.base.LUCK_SCRIPT:
+    admin.live.base.LUCK_SCRIPT += '<script src="/block_presentation.js?v=1"></script>'
 
 
 def effective_public_settings():
@@ -88,6 +90,31 @@ def public_summary():
 # Patch the same module-global function used by web.py's inherited Handler.
 admin.live.api_summary = public_summary
 admin.live.base.api_summary = public_summary
+
+
+def api_blocks_enhanced(status=None, limit=100):
+    """Return existing block data plus the already-stored finder identity."""
+    with admin.live.base.db() as con:
+        sql = """SELECT
+                    b.id,b.height,b.block_hash,b.status,b.confirmations,
+                    b.reward_atomic,b.network_reward_atomic,b.pool_fee_atomic,
+                    b.submitted_at,b.confirmed_at,b.credited_at,b.maturity_height,
+                    b.finder_account_id,b.finder_worker_id,
+                    a.address AS finder_address,
+                    w.name AS finder_worker
+                 FROM blocks b
+                 LEFT JOIN accounts a ON a.id=b.finder_account_id
+                 LEFT JOIN workers w ON w.id=b.finder_worker_id"""
+        params = []
+        if status:
+            if status == "pending":
+                sql += " WHERE b.status IN ('submitted','confirmed')"
+            else:
+                sql += " WHERE b.status=?"
+                params.append(status)
+        sql += " ORDER BY b.id DESC LIMIT ?"
+        params.append(min(max(int(limit), 1), 500))
+        return admin.live.base.rows(con, sql, params)
 
 
 def _stratum_online():
@@ -220,7 +247,8 @@ def api_pool(force=False):
 
 class EnhancedHandler(admin.AdminHandler):
     def do_GET(self):
-        path = urlparse(self.path).path
+        parsed = urlparse(self.path)
+        path = parsed.path
         if path == "/api/health":
             return self.send_json(api_health())
         if path == "/api/pool":
@@ -230,6 +258,17 @@ class EnhancedHandler(admin.AdminHandler):
                 return self.send_json(accounting_integrity(admin.live.base.DB_PATH))
             except Exception as exc:
                 return self.send_json({"ok": False, "error": str(exc)}, 500)
+        if path == "/api/blocks":
+            query = parse_qs(parsed.query)
+            try:
+                return self.send_json(
+                    api_blocks_enhanced(
+                        (query.get("status") or [None])[0],
+                        (query.get("limit") or [100])[0],
+                    )
+                )
+            except Exception as exc:
+                return self.send_json({"error": str(exc)}, 500)
         return super().do_GET()
 
 
