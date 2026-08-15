@@ -15,6 +15,7 @@ from yerbpool.diagnostics import accounting_integrity, read_payout_status
 ROOT = Path(__file__).resolve().parent
 _base_summary = admin.live.api_summary
 _base_public_settings = admin._public_settings
+_base_admin_html = admin._admin_html
 _health_cache = None
 _health_cache_at = 0.0
 _pool_cache = None
@@ -37,6 +38,17 @@ if "/payout_presentation.js" not in admin.live.base.LUCK_SCRIPT:
     admin.live.base.LUCK_SCRIPT += '<script src="/payout_presentation.js?v=3"></script>'
 if "/network_hash_chart.js" not in admin.live.base.LUCK_SCRIPT:
     admin.live.base.LUCK_SCRIPT += '<script src="/network_hash_chart.js?v=1"></script>'
+
+
+def enhanced_admin_html():
+    """Add the Pool Feed UI to the existing admin page without replacing it."""
+    html = _base_admin_html()
+    if "/admin_feed.js" not in html:
+        html = html.replace("</body>", '<script src="/admin_feed.js?v=1"></script></body>')
+    return html
+
+
+admin._admin_html = enhanced_admin_html
 
 
 def effective_public_settings():
@@ -133,6 +145,116 @@ def api_payouts_enhanced(limit=100):
                LIMIT ?""",
             (min(max(int(limit), 1), 100),),
         )
+
+
+def api_admin_events(event_type="all", limit=100):
+    """Build a safe admin activity feed from already-persisted pool records."""
+    event_type = str(event_type or "all").lower()
+    if event_type not in {"all", "blocks", "payouts", "workers", "treasury", "errors"}:
+        event_type = "all"
+    limit = min(max(int(limit), 1), 100)
+    events = []
+
+    with admin.live.base.db() as con:
+        if event_type in {"all", "blocks", "errors"}:
+            blocks = admin.live.base.rows(
+                con,
+                """SELECT b.id,b.height,b.status,b.submitted_at,b.confirmed_at,b.credited_at,
+                          b.finder_worker_id,w.name AS finder_worker
+                   FROM blocks b
+                   LEFT JOIN workers w ON w.id=b.finder_worker_id
+                   ORDER BY b.id DESC LIMIT 80""",
+            )
+            for block in blocks:
+                status = str(block.get("status") or "submitted").lower()
+                if event_type == "errors" and status != "orphan":
+                    continue
+                ts = int(block.get("credited_at") or block.get("confirmed_at") or block.get("submitted_at") or 0)
+                finder = str(block.get("finder_worker") or "").strip()
+                height = block.get("height")
+                if status == "orphan":
+                    severity = "error"
+                    message = f"Block #{height} marked orphaned"
+                elif status == "mature":
+                    severity = "success"
+                    message = f"Block #{height} matured"
+                elif status in {"confirmed", "submitted"}:
+                    severity = "success" if status == "submitted" else "info"
+                    message = f"Block #{height} {'found' if status == 'submitted' else 'confirmed'}"
+                else:
+                    severity = "info"
+                    message = f"Block #{height} status: {status}"
+                if finder:
+                    message += f" by {finder}"
+                events.append({"ts": ts, "type": "blocks", "severity": severity, "message": message})
+
+        if event_type in {"all", "payouts", "errors"}:
+            payouts = admin.live.base.rows(
+                con,
+                """SELECT p.id,p.created_at,p.sent_at,p.total_atomic,p.status,p.error,
+                          COUNT(pi.id) AS recipient_count
+                   FROM payouts p
+                   LEFT JOIN payout_items pi ON pi.payout_id=p.id
+                   GROUP BY p.id
+                   ORDER BY p.id DESC LIMIT 80""",
+            )
+            for payout in payouts:
+                status = str(payout.get("status") or "pending").lower()
+                if event_type == "errors" and status not in {"failed", "uncertain"}:
+                    continue
+                ts = int(payout.get("sent_at") or payout.get("created_at") or 0)
+                total = float(payout.get("total_atomic") or 0) / 100_000_000
+                recipients = int(payout.get("recipient_count") or 0)
+                if status == "sent":
+                    severity = "success"
+                    message = f"Payout batch #{payout['id']} sent: {total:.8f} YERB to {recipients} recipient{'s' if recipients != 1 else ''}"
+                elif status in {"failed", "uncertain"}:
+                    severity = "error"
+                    message = f"Payout batch #{payout['id']} {status}"
+                    if payout.get("error"):
+                        message += f": {str(payout['error'])[:160]}"
+                else:
+                    severity = "info"
+                    message = f"Payout batch #{payout['id']} status: {status}"
+                events.append({"ts": ts, "type": "payouts", "severity": severity, "message": message})
+
+        if event_type in {"all", "workers"}:
+            workers = admin.live.base.rows(
+                con,
+                """SELECT w.id,w.name,w.last_seen_at,a.address
+                   FROM workers w JOIN accounts a ON a.id=w.account_id
+                   WHERE w.last_seen_at IS NOT NULL AND w.last_seen_at>0
+                   ORDER BY w.last_seen_at DESC LIMIT 60""",
+            )
+            now = int(time.time())
+            for worker in workers:
+                ts = int(worker.get("last_seen_at") or 0)
+                age = max(0, now - ts)
+                severity = "success" if age <= 600 else "warning"
+                state = "active" if age <= 600 else "last seen"
+                message = f"Worker {worker.get('name') or worker.get('id')} {state}"
+                events.append({"ts": ts, "type": "workers", "severity": severity, "message": message})
+
+        if event_type in {"all", "treasury", "errors"}:
+            admin._ensure_treasury_history_table()
+            withdrawals = admin.live.base.rows(
+                con,
+                """SELECT id,created_at,destination,amount_atomic,txid,status,error
+                   FROM treasury_withdrawals ORDER BY id DESC LIMIT 60""",
+            )
+            for item in withdrawals:
+                status = str(item.get("status") or "pending").lower()
+                if event_type == "errors" and status != "failed":
+                    continue
+                amount = float(item.get("amount_atomic") or 0) / 100_000_000
+                severity = "success" if status == "sent" else ("error" if status == "failed" else "warning")
+                message = f"Treasury withdrawal {status}: {amount:.8f} YERB"
+                if status == "failed" and item.get("error"):
+                    message += f": {str(item['error'])[:160]}"
+                events.append({"ts": int(item.get("created_at") or 0), "type": "treasury", "severity": severity, "message": message})
+
+    events.sort(key=lambda event: int(event.get("ts") or 0), reverse=True)
+    return events[:limit]
 
 
 def _stratum_online():
@@ -277,6 +399,19 @@ class EnhancedHandler(admin.AdminHandler):
                 return self.send_json(accounting_integrity(admin.live.base.DB_PATH))
             except Exception as exc:
                 return self.send_json({"ok": False, "error": str(exc)}, 500)
+        if path == "/api/admin/events":
+            if not self._require_admin():
+                return
+            query = parse_qs(parsed.query)
+            try:
+                return self.send_json(
+                    api_admin_events(
+                        (query.get("type") or ["all"])[0],
+                        (query.get("limit") or [100])[0],
+                    )
+                )
+            except Exception as exc:
+                return self.send_json({"error": str(exc)}, 500)
         if path == "/api/blocks":
             query = parse_qs(parsed.query)
             try:
