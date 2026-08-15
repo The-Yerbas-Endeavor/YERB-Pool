@@ -71,6 +71,7 @@
     });
 
     row.classList.add('payout-ready');
+    row.style.visibility='visible';
   }
 
   async function render(){
@@ -87,9 +88,6 @@
         ? table(['Batch','Status','Total','Recipients','Age'],payouts.slice(0,5).map(p=>`<tr><td><a href="/payouts#${encodeURIComponent(p.id)}">#${p.id}</a></td><td>${payoutBadge(p.status)}</td><td>${coin(p.total_atomic)} YERB</td><td>${Number(p.recipient_count||0).toLocaleString()}</td><td class="payout-age">${age(p.sent_at||p.created_at)}</td></tr>`))
         : '<div class="empty">No payouts yet.</div>';
 
-      // Hidden compatibility marker prevents the older home-layout helper from
-      // recreating a public Miners card. It is scoped to this dashboard card;
-      // the /miners route remains unchanged.
       section.innerHTML=`<h2 class="home-miners-compat-marker" aria-hidden="true">Miners</h2><div class="section-head"><h2>Recent Payouts</h2><a href="/payouts">View all →</a></div>${body}`;
       enforceThreeCardRow(section);
     }finally{
@@ -103,6 +101,8 @@
       if(findTargetSection()) break;
       await new Promise(r=>setTimeout(r,100));
     }
+    const row=homeRow();
+    if(row) row.style.visibility='hidden';
     await render();
     setInterval(render,15000);
   }
