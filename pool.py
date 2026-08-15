@@ -17,8 +17,8 @@ from yerbpool.sqlite_safe import install_safe_sqlite_connections
 from yerbpool.stratum import StratumServer
 
 
-FORCE_PAYOUT_REQUEST = Path("web") / "force_payout_request.json"
-FORCE_PAYOUT_RESULT = Path("web") / "force_payout_result.json"
+FORCE_PAYOUT_REQUEST = Path("runtime") / "force_payout_request.json"
+FORCE_PAYOUT_RESULT = Path("runtime") / "force_payout_result.json"
 
 
 def _write_force_result(payload):
