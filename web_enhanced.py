@@ -1,10 +1,5 @@
 #!/usr/bin/env python3
-"""Additive health/diagnostics layer for the existing YERB Pool dashboard.
-
-This wrapper deliberately reuses the production AdminHandler unchanged for all
-existing routes and POST actions. Only new read-only GET endpoints and small
-public presentation enhancements are added here.
-"""
+"""Additive health/diagnostics layer for the existing YERB Pool dashboard."""
 
 import socket
 import time
@@ -26,8 +21,14 @@ _pool_cache = None
 _pool_cache_at = 0.0
 CACHE_SECONDS = 10.0
 
-# LiveHandler injects LUCK_SCRIPT into the existing page. Appending scripts here
-# avoids modifying the working dashboard renderer or admin implementation.
+# Public Configure page uses the normal dashboard shell.
+admin.live.base.FRONTEND_ROUTES.add("/configure")
+
+# LiveHandler injects LUCK_SCRIPT before reward_labels.js. Configure is loaded
+# first so its hidden compatibility marker prevents the legacy home command
+# injector from recreating Prebuilt Miner Commands on the dashboard.
+if "/configure_page.js" not in admin.live.base.LUCK_SCRIPT:
+    admin.live.base.LUCK_SCRIPT += '<script src="/configure_page.js?v=1"></script>'
 if "/pool_status.js" not in admin.live.base.LUCK_SCRIPT:
     admin.live.base.LUCK_SCRIPT += '<script src="/pool_status.js?v=2"></script>'
 if "/block_presentation.js" not in admin.live.base.LUCK_SCRIPT:
@@ -51,8 +52,6 @@ def effective_public_settings():
     return result
 
 
-# web_admin resolves this module-global function at request time, so the admin
-# panel and /api/pool-settings now report the same effective scheduler values.
 admin._public_settings = effective_public_settings
 
 
@@ -85,19 +84,16 @@ def public_summary():
                 - int(row.get("immature_balance_atomic") or 0),
             )
     except Exception:
-        # Public summary must remain available even if this cosmetic exclusion
-        # cannot be calculated during a transient database problem.
         pass
     return result
 
 
-# Patch the same module-global function used by web.py's inherited Handler.
 admin.live.api_summary = public_summary
 admin.live.base.api_summary = public_summary
 
 
 def api_blocks_enhanced(status=None, limit=100):
-    """Return existing block data plus the already-stored finder identity."""
+    """Return block data plus the already-stored finder identity."""
     with admin.live.base.db() as con:
         sql = """SELECT
                     b.id,b.height,b.block_hash,b.status,b.confirmations,
@@ -122,7 +118,7 @@ def api_blocks_enhanced(status=None, limit=100):
 
 
 def api_payouts_enhanced(limit=100):
-    """Return at most 100 payout batches with the actual miner recipient count."""
+    """Return at most 100 payout batches with miner recipient counts."""
     with admin.live.base.db() as con:
         return admin.live.base.rows(
             con,
@@ -165,11 +161,7 @@ def _wallet_health():
             "verification_progress": float(info.get("verificationprogress", 0)) if isinstance(info, dict) else None,
         }
     except Exception as exc:
-        return {
-            "online": False,
-            "latency_ms": None,
-            "error": str(exc)[:200],
-        }
+        return {"online": False, "latency_ms": None, "error": str(exc)[:200]}
 
 
 def _database_health():
@@ -242,7 +234,10 @@ def api_pool(force=False):
     luck = admin.live.api_luck()
     payout_cfg = effective_public_settings()
     payout_status = read_payout_status(ROOT)
-    interval = int(payout_status.get("interval_seconds") or payout_cfg.get("check_interval_seconds", 7200))
+    interval = int(
+        payout_status.get("interval_seconds")
+        or payout_cfg.get("check_interval_seconds", 7200)
+    )
 
     result = {
         "name": "YERB Pool",
@@ -254,7 +249,9 @@ def api_pool(force=False):
         "payout_interval_seconds": interval,
         "next_payout_check_at": int(payout_status.get("next_check_at") or 0),
         "hashrate": float(luck.get("pool_hashrate") or 0),
-        "hashrate_window_seconds": int(luck.get("hashrate_window_seconds") or admin.live.HASHRATE_WINDOW),
+        "hashrate_window_seconds": int(
+            luck.get("hashrate_window_seconds") or admin.live.HASHRATE_WINDOW
+        ),
         "network_difficulty": luck.get("network_difficulty"),
         "miners": int(summary.get("accounts", {}).get("accounts") or 0),
         "active_workers": int(summary.get("workers", {}).get("active_workers") or 0),
@@ -307,4 +304,6 @@ if __name__ == "__main__":
         f"YERB Pool web/admin listening on http://{admin.live.base.HOST}:{admin.live.base.PORT} "
         "(health diagnostics enabled)"
     )
-    ThreadingHTTPServer((admin.live.base.HOST, admin.live.base.PORT), EnhancedHandler).serve_forever()
+    ThreadingHTTPServer(
+        (admin.live.base.HOST, admin.live.base.PORT), EnhancedHandler
+    ).serve_forever()
