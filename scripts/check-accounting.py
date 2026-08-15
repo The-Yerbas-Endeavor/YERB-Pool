@@ -1,6 +1,13 @@
 #!/usr/bin/env python3
 import json
+import sys
 from pathlib import Path
+
+# Allow this script to be executed directly from scripts/ without requiring
+# PYTHONPATH to be set or preserved through sudo.
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 from yerbpool.config import load_config
 from yerbpool.diagnostics import accounting_integrity
