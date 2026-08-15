@@ -13,6 +13,16 @@
     return heading?.closest('.chart-card')||null;
   }
 
+  function primeCard(){
+    const card=chartTarget();
+    if(!card) return null;
+    const heading=card.querySelector('h3');
+    if(heading && heading.textContent.trim()==='Share Activity'){
+      card.innerHTML='<h3>Network vs Pool Hashrate</h3><div class="muted small">24-hour pool estimate compared with the current Yerbas network hashrate reference.</div><div class="empty" style="margin-top:12px">Loading network and pool hashrate…</div>';
+    }
+    return card;
+  }
+
   function svgChart(history,networkHashrate){
     const W=720,H=240,L=58,R=12,T=14,B=30,iw=W-L-R,ih=H-T-B;
     const values=history.map(x=>Number(x.hashrate||0));
@@ -47,7 +57,7 @@
 
   async function render(){
     if(busy) return;
-    const card=chartTarget();
+    const card=primeCard();
     if(!card) return;
     busy=true;
     try{
@@ -68,8 +78,8 @@
 
   async function install(){
     for(let i=0;i<30;i++){
-      if(chartTarget()) break;
-      await new Promise(r=>setTimeout(r,100));
+      if(primeCard()) break;
+      await new Promise(r=>setTimeout(r,25));
     }
     render();
     setInterval(render,15000);
