@@ -7,12 +7,23 @@
     const style=document.createElement('style');
     style.id='yerb-pool-status-style';
     style.textContent=`
+      body{
+        padding-bottom:48px!important;
+      }
       #yerb-pool-status{
-        border-bottom:1px solid #29352d;
-        background:#121713;
+        position:fixed;
+        left:0;
+        right:0;
+        bottom:0;
+        z-index:1000;
+        border-top:1px solid #29352d;
+        background:rgba(18,23,19,.97);
+        box-shadow:0 -8px 24px rgba(0,0,0,.18);
+        backdrop-filter:blur(8px);
+        -webkit-backdrop-filter:blur(8px);
       }
       #yerb-pool-status .status-inner{
-        max-width:1200px;
+        max-width:1600px;
         margin:auto;
         padding:9px 24px;
         display:flex;
@@ -43,8 +54,18 @@
       #yerb-pool-status a:hover{text-decoration:underline}
       #yerb-pool-status .status-spacer{flex:1}
       @media(max-width:700px){
-        #yerb-pool-status .status-inner{padding:9px 14px;gap:10px 14px}
+        body{padding-bottom:74px!important}
+        #yerb-pool-status .status-inner{
+          padding:8px 14px;
+          gap:7px 12px;
+          justify-content:center;
+          font-size:11px;
+        }
         #yerb-pool-status .status-spacer{display:none}
+      }
+      @media(max-width:430px){
+        body{padding-bottom:92px!important}
+        #yerb-pool-status .status-inner{gap:6px 10px}
       }
     `;
     document.head.appendChild(style);
@@ -53,10 +74,11 @@
   function ensureStrip(){
     let root=document.getElementById('yerb-pool-status');
     if(root) return root;
-    const header=document.querySelector('header');
-    if(!header) return null;
+    if(!document.body) return null;
     root=document.createElement('div');
     root.id='yerb-pool-status';
+    root.setAttribute('role','status');
+    root.setAttribute('aria-label','YERB Pool live status');
     root.innerHTML=`<div class="status-inner">
       <span class="status-item"><i id="status-stratum-dot" class="status-dot"></i><span id="status-stratum">Stratum checking…</span></span>
       <span class="status-item"><i id="status-wallet-dot" class="status-dot"></i><span id="status-wallet">Wallet checking…</span></span>
@@ -66,7 +88,7 @@
       <span class="status-item">Fee <strong id="status-fee">—</strong></span>
       <a class="status-item" href="/payouts">Next payout <strong id="status-payout">—</strong></a>
     </div>`;
-    header.insertAdjacentElement('afterend',root);
+    document.body.appendChild(root);
     return root;
   }
 
