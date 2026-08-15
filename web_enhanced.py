@@ -2,7 +2,7 @@
 """Additive health/diagnostics layer for the existing YERB Pool dashboard.
 
 This wrapper deliberately reuses the production AdminHandler unchanged for all
-existing routes and POST actions.  Only new read-only GET endpoints and a small
+existing routes and POST actions. Only new read-only GET endpoints and a small
 public status script are added here.
 """
 
@@ -19,11 +19,30 @@ from yerbpool.diagnostics import accounting_integrity, read_payout_status
 
 ROOT = Path(__file__).resolve().parent
 _base_summary = admin.live.api_summary
+_base_public_settings = admin._public_settings
 
 # LiveHandler injects LUCK_SCRIPT into the existing page. Appending one script
 # here avoids modifying the working dashboard renderer or admin implementation.
 if "/pool_status.js" not in admin.live.base.LUCK_SCRIPT:
     admin.live.base.LUCK_SCRIPT += '<script src="/pool_status.js?v=1"></script>'
+
+
+def effective_public_settings():
+    """Expose the payout interval the scheduler actually uses."""
+    result = _base_public_settings()
+    interval = int(result.get("check_interval_seconds", 7200))
+    if interval == 60:
+        interval = 7200
+    result["check_interval_seconds"] = interval
+    result["block_check_interval_seconds"] = int(
+        admin.CFG.get("payouts", {}).get("block_check_interval_seconds", 60)
+    )
+    return result
+
+
+# web_admin resolves this module-global function at request time, so the admin
+# panel and /api/pool-settings now report the same effective scheduler values.
+admin._public_settings = effective_public_settings
 
 
 def public_summary():
@@ -154,11 +173,9 @@ def api_health():
 def api_pool():
     summary = public_summary()
     luck = admin.live.api_luck()
-    payout_cfg = admin.CFG.get("payouts", {})
+    payout_cfg = effective_public_settings()
     payout_status = read_payout_status(ROOT)
     interval = int(payout_status.get("interval_seconds") or payout_cfg.get("check_interval_seconds", 7200))
-    if interval == 60:
-        interval = 7200
 
     return {
         "name": "YERB Pool",
