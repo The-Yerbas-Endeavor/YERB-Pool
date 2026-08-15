@@ -33,7 +33,7 @@ if "/pool_status.js" not in admin.live.base.LUCK_SCRIPT:
 if "/block_presentation.js" not in admin.live.base.LUCK_SCRIPT:
     admin.live.base.LUCK_SCRIPT += '<script src="/block_presentation.js?v=1"></script>'
 if "/payout_presentation.js" not in admin.live.base.LUCK_SCRIPT:
-    admin.live.base.LUCK_SCRIPT += '<script src="/payout_presentation.js?v=1"></script>'
+    admin.live.base.LUCK_SCRIPT += '<script src="/payout_presentation.js?v=3"></script>'
 
 
 def effective_public_settings():
