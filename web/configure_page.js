@@ -40,13 +40,6 @@
     }
   ];
 
-  const downloads=[
-    {name:'cpuminer-opt-gr',type:'CPU',url:'https://github.com/The-Yerbas-Endeavor/Yerbas-Miner'},
-    {name:'SRBMiner-MULTI',type:'CPU / GPU',url:'https://github.com/doktor83/SRBMiner-Multi/releases'},
-    {name:'BzMiner',type:'GPU',url:'https://github.com/bzminer/bzminer/releases'},
-    {name:'WildRig Multi',type:'GPU',url:'https://github.com/andru-kun/wildrig-multi/releases'}
-  ];
-
   function installNav(){
     const nav=document.querySelector('header nav');
     if(!nav) return;
@@ -84,12 +77,9 @@
       .configure-page .command-input{width:100%;box-sizing:border-box;font-family:monospace;padding:10px 12px;border-radius:7px;border:1px solid rgba(100,255,140,.25);background:#0b120d;color:inherit}
       .configure-page .copy-command,.configure-page .copy-stratum{cursor:pointer;background:#1d2a20;color:#b9e6bb;border:1px solid #35553d;border-radius:6px;padding:8px 11px;font-weight:700}
       .configure-page .copy-command:hover,.configure-page .copy-stratum:hover{border-color:var(--yerb,#65c466);color:#e9f7ea}
-      .configure-page .download-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-top:12px}
-      .configure-page .download-item{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:14px 15px;border:1px solid var(--yerb-border,#294332);border-radius:9px;background:linear-gradient(155deg,#171d18,#141714)}
-      .configure-page .download-item .muted{font-size:11px}
       .configure-page .section-copy{margin-top:32px}
       @media(max-width:700px){
-        .configure-page .quick-grid,.configure-page .download-list{grid-template-columns:1fr}
+        .configure-page .quick-grid{grid-template-columns:1fr}
         .configure-page .command-row{grid-template-columns:1fr}
         .configure-page .copy-command{width:100%}
       }
@@ -125,7 +115,7 @@
   }
 
   function commandCards(group){
-    return commands.filter(c=>c.group===group).map((c,i)=>`
+    return commands.filter(c=>c.group===group).map(c=>`
       <div class="command-card">
         <div class="command-head">
           <div><strong>${esc(c.name)}</strong><span class="command-type">${esc(c.type)}</span></div>
@@ -171,14 +161,6 @@
         <section>
           <h2>GPU Miners</h2>
           <div class="command-list">${commandCards('gpu')}</div>
-        </section>
-
-        <section>
-          <h2>Recommended Miners</h2>
-          <div class="muted">Download miners from their project/release pages. Verify releases before running third-party mining software.</div>
-          <div class="download-list">
-            ${downloads.map(d=>`<div class="download-item"><div><strong>${esc(d.name)}</strong><div class="muted">${esc(d.type)}</div></div><a href="${esc(d.url)}" target="_blank" rel="noopener noreferrer">Download →</a></div>`).join('')}
-          </div>
         </section>
       </div>`;
 
