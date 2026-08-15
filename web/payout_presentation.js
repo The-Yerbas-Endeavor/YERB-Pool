@@ -39,28 +39,38 @@
     return document.getElementById('home-panel-row');
   }
 
+  function headingSection(label,root=document){
+    const heading=[...root.querySelectorAll('h2')].find(h=>h.textContent.trim()===label);
+    return heading?.closest('section')||null;
+  }
+
   function findTargetSection(){
     const row=homeRow();
     if(!row) return null;
-
-    const payoutHeading=[...row.querySelectorAll('h2')].find(h=>h.textContent.trim()==='Recent Payouts');
-    if(payoutHeading) return payoutHeading.closest('section');
-
-    const minerHeading=[...row.querySelectorAll('h2')].find(h=>h.textContent.trim()==='Miners');
-    return minerHeading?.closest('section')||null;
+    return headingSection('Recent Payouts',row) || headingSection('Miners',row);
   }
 
-  function removeExtraHomePayoutSections(keep){
+  function enforceThreeCardRow(keep){
     const main=document.querySelector('main#app');
     const row=homeRow();
-    if(!main || !row) return;
+    if(!main || !row || !keep) return;
 
-    const sections=[...main.querySelectorAll(':scope > section')];
-    for(const section of sections){
-      if(section===keep || row.contains(section)) continue;
-      const heading=section.querySelector('h2');
-      if(heading && heading.textContent.trim()==='Recent Payouts') section.remove();
+    // Keep the payout card as the third card in the existing dashboard row.
+    const blocks=headingSection('Recent Blocks',row);
+    if(keep.parentNode!==row){
+      if(blocks) blocks.insertAdjacentElement('afterend',keep);
+      else row.appendChild(keep);
     }
+
+    // The older dashboard helper may recreate Miners after a refresh. Remove
+    // that home-only section; /miners itself is a separate route and untouched.
+    [...main.querySelectorAll('section')].forEach(section=>{
+      if(section===keep) return;
+      const heading=section.querySelector(':scope > .section-head h2, :scope > h2');
+      if(!heading) return;
+      const label=heading.textContent.trim();
+      if(label==='Miners' || label==='Recent Payouts') section.remove();
+    });
   }
 
   async function render(){
@@ -77,7 +87,7 @@
         ? table(['Batch','Status','Total','Recipients','Age'],payouts.slice(0,5).map(p=>`<tr><td><a href="/payouts#${encodeURIComponent(p.id)}">#${p.id}</a></td><td>${payoutBadge(p.status)}</td><td>${coin(p.total_atomic)} YERB</td><td>${Number(p.recipient_count||0).toLocaleString()}</td><td class="payout-age">${age(p.sent_at||p.created_at)}</td></tr>`))
         : '<div class="empty">No payouts yet.</div>';
       section.innerHTML=`<div class="section-head"><h2>Recent Payouts</h2><a href="/payouts">View all →</a></div>${body}`;
-      removeExtraHomePayoutSections(section);
+      enforceThreeCardRow(section);
     }finally{
       busy=false;
     }
@@ -90,10 +100,6 @@
       await new Promise(r=>setTimeout(r,100));
     }
     render();
-
-    // The legacy dashboard renderer may recreate a Miners section after a
-    // refresh. Re-enforce the intended Top Workers / Recent Blocks /
-    // Recent Payouts row quickly and without redrawing the whole dashboard.
     setInterval(render,1000);
   }
 
