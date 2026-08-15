@@ -1,5 +1,42 @@
+# Runtime configuration and pool data
 config.json
 *.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+
+# Python runtime artifacts
 __pycache__/
-*.pyc
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Native/CMake build artifacts
 native/build/
+build/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+*.so
+*.dylib
+*.dll
+*.o
+*.a
+
+# Logs, crash artifacts and temporary files
+*.log
+core
+core.*
+*.tmp
+*.swp
+*.swo
+*~
+
+# Local editor/OS metadata
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
