@@ -11,8 +11,8 @@ from urllib.parse import urlparse
 import web_enhanced as enhanced
 
 
-FORCE_PAYOUT_REQUEST = Path("web") / "force_payout_request.json"
-FORCE_PAYOUT_RESULT = Path("web") / "force_payout_result.json"
+FORCE_PAYOUT_REQUEST = Path("runtime") / "force_payout_request.json"
+FORCE_PAYOUT_RESULT = Path("runtime") / "force_payout_result.json"
 
 
 def _write_force_request(payload):
