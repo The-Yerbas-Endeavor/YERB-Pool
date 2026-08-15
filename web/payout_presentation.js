@@ -3,6 +3,15 @@
 
   let busy=false;
 
+  function ensureNetworkHashChart(){
+    if(document.querySelector('script[data-network-hash-chart]')) return;
+    const script=document.createElement('script');
+    script.src='/network_hash_chart.js?v=1';
+    script.dataset.networkHashChart='1';
+    script.defer=true;
+    document.head.appendChild(script);
+  }
+
   function ensureStyles(){
     if(document.getElementById('yerb-payout-card-styles')) return;
     const style=document.createElement('style');
@@ -113,6 +122,7 @@
 
   async function install(){
     ensureStyles();
+    ensureNetworkHashChart();
     for(let i=0;i<30;i++){
       if(findTargetSection()) break;
       await new Promise(r=>setTimeout(r,100));
