@@ -43,7 +43,7 @@
   function installNav(){
     const nav=document.querySelector('header nav');
     if(!nav) return;
-    nav.innerHTML='<a href="/">Dashboard</a><a href="/miners">Miners</a><a href="/blocks">Blocks</a><a href="/payouts">Payouts</a><a href="/configure">Configure</a>';
+    nav.innerHTML='<a href="/">Dashboard</a><a href="/miners">Miners</a><a href="/blocks">Blocks</a><a href="/payouts">Payouts</a><a href="/configure">Configure</a><a href="/api/summary">API</a>';
   }
 
   function blockLegacyHomeCommands(){
