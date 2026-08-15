@@ -1,1 +1,0 @@
-# Python standard library only. Native GhostRider is built with CMake.
