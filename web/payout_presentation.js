@@ -15,6 +15,7 @@
       #home-panel-row .recent-payouts-card table th,
       #home-panel-row .recent-payouts-card table td{padding:8px 6px;font-size:12px}
       #home-panel-row .recent-payouts-card .payout-age{color:#91a394;font-size:11px;white-space:nowrap}
+      .home-miners-compat-marker{display:none!important}
     `;
     document.head.appendChild(style);
   }
@@ -55,15 +56,12 @@
     const row=homeRow();
     if(!main || !row || !keep) return;
 
-    // Keep the payout card as the third card in the existing dashboard row.
     const blocks=headingSection('Recent Blocks',row);
     if(keep.parentNode!==row){
       if(blocks) blocks.insertAdjacentElement('afterend',keep);
       else row.appendChild(keep);
     }
 
-    // The older dashboard helper may recreate Miners after a refresh. Remove
-    // that home-only section; /miners itself is a separate route and untouched.
     [...main.querySelectorAll('section')].forEach(section=>{
       if(section===keep) return;
       const heading=section.querySelector(':scope > .section-head h2, :scope > h2');
@@ -71,6 +69,8 @@
       const label=heading.textContent.trim();
       if(label==='Miners' || label==='Recent Payouts') section.remove();
     });
+
+    row.classList.add('payout-ready');
   }
 
   async function render(){
@@ -86,7 +86,11 @@
       const body=payouts.length
         ? table(['Batch','Status','Total','Recipients','Age'],payouts.slice(0,5).map(p=>`<tr><td><a href="/payouts#${encodeURIComponent(p.id)}">#${p.id}</a></td><td>${payoutBadge(p.status)}</td><td>${coin(p.total_atomic)} YERB</td><td>${Number(p.recipient_count||0).toLocaleString()}</td><td class="payout-age">${age(p.sent_at||p.created_at)}</td></tr>`))
         : '<div class="empty">No payouts yet.</div>';
-      section.innerHTML=`<div class="section-head"><h2>Recent Payouts</h2><a href="/payouts">View all →</a></div>${body}`;
+
+      // Hidden compatibility marker prevents the older home-layout helper from
+      // recreating a public Miners card. It is scoped to this dashboard card;
+      // the /miners route remains unchanged.
+      section.innerHTML=`<h2 class="home-miners-compat-marker" aria-hidden="true">Miners</h2><div class="section-head"><h2>Recent Payouts</h2><a href="/payouts">View all →</a></div>${body}`;
       enforceThreeCardRow(section);
     }finally{
       busy=false;
@@ -99,8 +103,8 @@
       if(findTargetSection()) break;
       await new Promise(r=>setTimeout(r,100));
     }
-    render();
-    setInterval(render,1000);
+    await render();
+    setInterval(render,15000);
   }
 
   if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',install);
