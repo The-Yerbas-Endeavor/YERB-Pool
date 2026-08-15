@@ -1,6 +1,9 @@
 import asyncio
+import json
 import logging
+import time
 from decimal import Decimal, ROUND_DOWN
+from pathlib import Path
 
 from yerbpool.database import COIN
 
@@ -32,6 +35,33 @@ class PayoutManager:
         self.pool_address = str(cfg.get("pool_address", ""))
         self.payout_account = pcfg.get("account")
 
+        # This file contains public scheduler metadata only. It is intentionally
+        # separate from accounting state so dashboard transparency cannot alter
+        # balances or payout records.
+        self.status_path = Path("web") / "payout_status.json"
+        self.next_payout_check_at = 0
+        self.last_payout_check_at = 0
+        self.last_payout_result = "waiting"
+
+    def _write_status(self, **extra):
+        """Atomically publish read-only payout scheduler state for the dashboard."""
+        data = {
+            "enabled": self.enabled,
+            "interval_seconds": self.payout_interval,
+            "minimum_payout_atomic": self.minimum_atomic,
+            "next_check_at": int(self.next_payout_check_at or 0),
+            "last_check_at": int(self.last_payout_check_at or 0),
+            "last_result": self.last_payout_result,
+        }
+        data.update(extra)
+        try:
+            self.status_path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = self.status_path.with_suffix(".json.tmp")
+            tmp.write_text(json.dumps(data, separators=(",", ":")) + "\n", encoding="utf-8")
+            tmp.replace(self.status_path)
+        except Exception:
+            logging.exception("Unable to publish payout scheduler status")
+
     async def start(self):
         logging.info(
             "Payout scheduler enabled=%s interval=%ss block_check=%ss",
@@ -41,7 +71,11 @@ class PayoutManager:
         )
         asyncio.create_task(self._block_loop())
         if self.enabled:
+            self.next_payout_check_at = int(time.time()) + self.payout_interval
+            self._write_status()
             asyncio.create_task(self._payout_loop())
+        else:
+            self._write_status()
 
     async def _block_loop(self):
         while True:
@@ -56,11 +90,18 @@ class PayoutManager:
         # service startup. This prevents a restart from causing an immediate
         # unscheduled payment.
         while True:
-            await asyncio.sleep(self.payout_interval)
+            delay = max(1, int(self.next_payout_check_at - time.time()))
+            await asyncio.sleep(delay)
+            self.last_payout_check_at = int(time.time())
             try:
-                await self.process_payouts()
+                result = await self.process_payouts()
+                self.last_payout_result = result or "checked"
             except Exception:
+                self.last_payout_result = "error"
                 logging.exception("Payout cycle failed")
+            finally:
+                self.next_payout_check_at = int(time.time()) + self.payout_interval
+                self._write_status()
 
     async def process_blocks(self):
         for block in self.db.pending_blocks():
@@ -138,7 +179,11 @@ class PayoutManager:
         accounts = self.db.eligible_payout_accounts(self.minimum_atomic)
         if not accounts:
             logging.info("Scheduled payout check: no eligible miners")
-            return
+            self._write_status(eligible_miners=0, eligible_atomic=0)
+            return "no_eligible_miners"
+
+        eligible_atomic = sum(max(0, int(a.get("balance_atomic", 0))) for a in accounts)
+        self._write_status(eligible_miners=len(accounts), eligible_atomic=eligible_atomic)
 
         try:
             payout_account = await self._resolve_payout_account()
@@ -151,7 +196,7 @@ class PayoutManager:
             wallet_atomic = int(Decimal(str(account_balance or 0)) * COIN)
         except Exception:
             logging.exception("Unable to read payout account balance before payout")
-            return
+            return "wallet_unavailable"
 
         accounts = self._cap_accounts_to_wallet(accounts, wallet_atomic)
         if not accounts:
@@ -161,14 +206,14 @@ class PayoutManager:
                 wallet_atomic / COIN,
                 self.fee_reserve_atomic / COIN,
             )
-            return
+            return "deferred_fee_reserve"
 
         # All eligible miners are collected into one payout record and one
         # sendmany RPC transaction for this scheduled two-hour cycle.
         payout_id = self.db.create_payout(accounts)
         items = self.db.payout_items(payout_id)
         if not items:
-            return
+            return "empty_batch"
 
         amounts = {
             item["address"]: float(Decimal(item["amount_atomic"]) / Decimal(COIN))
@@ -198,13 +243,22 @@ class PayoutManager:
             if "insufficient funds" in message or "invalid amount" in message or "invalid yerbas address" in message:
                 self.db.mark_payout_failed(payout_id, exc)
                 logging.exception("Payout batch %s failed before broadcast", payout_id)
-            else:
-                self.db.mark_payout_uncertain(payout_id, exc)
-                logging.exception(
-                    "Payout batch %s has uncertain broadcast state; manual reconciliation required",
-                    payout_id,
-                )
-            return
+                return "failed_before_broadcast"
+            self.db.mark_payout_uncertain(payout_id, exc)
+            logging.exception(
+                "Payout batch %s has uncertain broadcast state; manual reconciliation required",
+                payout_id,
+            )
+            return "uncertain"
 
         self.db.mark_payout_sent(payout_id, str(txid))
+        self._write_status(
+            eligible_miners=len(items),
+            eligible_atomic=total_atomic,
+            last_payout_id=payout_id,
+            last_payout_txid=str(txid),
+            last_payout_recipients=len(items),
+            last_payout_atomic=total_atomic,
+        )
         logging.warning("PAYOUT SENT id=%s txid=%s recipients=%s", payout_id, txid, len(items))
+        return "sent"
