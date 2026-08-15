@@ -32,6 +32,8 @@ if "/pool_status.js" not in admin.live.base.LUCK_SCRIPT:
     admin.live.base.LUCK_SCRIPT += '<script src="/pool_status.js?v=2"></script>'
 if "/block_presentation.js" not in admin.live.base.LUCK_SCRIPT:
     admin.live.base.LUCK_SCRIPT += '<script src="/block_presentation.js?v=1"></script>'
+if "/payout_presentation.js" not in admin.live.base.LUCK_SCRIPT:
+    admin.live.base.LUCK_SCRIPT += '<script src="/payout_presentation.js?v=1"></script>'
 
 
 def effective_public_settings():
@@ -115,6 +117,24 @@ def api_blocks_enhanced(status=None, limit=100):
         sql += " ORDER BY b.id DESC LIMIT ?"
         params.append(min(max(int(limit), 1), 500))
         return admin.live.base.rows(con, sql, params)
+
+
+def api_payouts_enhanced(limit=100):
+    """Return payout batches with the actual number of miner recipients."""
+    with admin.live.base.db() as con:
+        return admin.live.base.rows(
+            con,
+            """SELECT
+                   p.id,p.created_at,p.sent_at,p.txid,p.total_atomic,
+                   p.fee_atomic,p.status,p.error,
+                   COUNT(pi.id) AS recipient_count
+               FROM payouts p
+               LEFT JOIN payout_items pi ON pi.payout_id=p.id
+               GROUP BY p.id
+               ORDER BY p.id DESC
+               LIMIT ?""",
+            (min(max(int(limit), 1), 500),),
+        )
 
 
 def _stratum_online():
@@ -266,6 +286,14 @@ class EnhancedHandler(admin.AdminHandler):
                         (query.get("status") or [None])[0],
                         (query.get("limit") or [100])[0],
                     )
+                )
+            except Exception as exc:
+                return self.send_json({"error": str(exc)}, 500)
+        if path == "/api/payouts":
+            query = parse_qs(parsed.query)
+            try:
+                return self.send_json(
+                    api_payouts_enhanced((query.get("limit") or [100])[0])
                 )
             except Exception as exc:
                 return self.send_json({"error": str(exc)}, 500)
