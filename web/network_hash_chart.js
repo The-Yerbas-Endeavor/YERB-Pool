@@ -4,6 +4,7 @@
   const BLOCK_TARGET_SECONDS=150;
   const DIFF1_HASHES=4294967296;
   let busy=false;
+  let renderQueued=false;
 
   function chartTarget(){
     const main=document.querySelector('main#app');
@@ -13,12 +14,12 @@
     return heading?.closest('.chart-card')||null;
   }
 
-  function primeCard(){
+  function claimCard(){
     const card=chartTarget();
     if(!card) return null;
     const heading=card.querySelector('h3');
     if(heading && heading.textContent.trim()==='Share Activity'){
-      card.innerHTML='<h3>Network vs Pool Hashrate</h3><div class="muted small">24-hour pool estimate compared with the current Yerbas network hashrate reference.</div><div class="empty" style="margin-top:12px">Loading network and pool hashrate…</div>';
+      card.innerHTML='<h3>Network vs Pool Hashrate</h3><div class="muted small">Loading network and pool hashrate data…</div><div class="empty" style="margin-top:12px">Loading chart…</div>';
     }
     return card;
   }
@@ -56,9 +57,8 @@
   }
 
   async function render(){
-    if(busy) return;
-    const card=primeCard();
-    if(!card) return;
+    const card=claimCard();
+    if(!card || busy) return;
     busy=true;
     try{
       const [history,luck]=await Promise.all([
@@ -66,22 +66,38 @@
         get('/api/luck').catch(()=>null)
       ]);
       if(!history.length || !luck) return;
+      const currentCard=claimCard();
+      if(!currentCard) return;
       const difficulty=Number(luck.network_difficulty||0);
       const networkHashrate=difficulty>0 ? difficulty*DIFF1_HASHES/BLOCK_TARGET_SECONDS : 0;
       const poolHashrate=Number(luck.pool_hashrate||0);
       ensureStyles();
-      card.innerHTML=`<h3>Network vs Pool Hashrate</h3><div class="muted small">24-hour pool estimate compared with the current Yerbas network hashrate reference.</div><div class="network-pool-values"><span>Pool now <strong>${hashRate(poolHashrate)}</strong></span><span>Network now <strong>${hashRate(networkHashrate)}</strong></span></div>${svgChart(history,networkHashrate)}<div class="network-pool-legend"><span><i class="dot hashdot"></i>Pool hashrate</span><span><i class="dot network-dot"></i>Current network reference</span></div>`;
+      currentCard.innerHTML=`<h3>Network vs Pool Hashrate</h3><div class="muted small">24-hour pool estimate compared with the current Yerbas network hashrate reference.</div><div class="network-pool-values"><span>Pool now <strong>${hashRate(poolHashrate)}</strong></span><span>Network now <strong>${hashRate(networkHashrate)}</strong></span></div>${svgChart(history,networkHashrate)}<div class="network-pool-legend"><span><i class="dot hashdot"></i>Pool hashrate</span><span><i class="dot network-dot"></i>Current network reference</span></div>`;
     }finally{
       busy=false;
     }
   }
 
-  async function install(){
-    for(let i=0;i<30;i++){
-      if(primeCard()) break;
-      await new Promise(r=>setTimeout(r,25));
+  function queueRender(){
+    claimCard();
+    if(renderQueued) return;
+    renderQueued=true;
+    requestAnimationFrame(()=>{
+      renderQueued=false;
+      render();
+    });
+  }
+
+  function install(){
+    ensureStyles();
+    queueRender();
+
+    const main=document.querySelector('main#app');
+    if(main){
+      const observer=new MutationObserver(()=>queueRender());
+      observer.observe(main,{childList:true,subtree:true});
     }
-    render();
+
     setInterval(render,15000);
   }
 
