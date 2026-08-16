@@ -23,15 +23,15 @@
       .payout-status-sent{color:#8ee889;background:rgba(101,196,102,.13);border-color:rgba(101,196,102,.38)}
       .payout-status-pending,.payout-status-broadcasting{color:#ffe066;background:rgba(255,224,102,.12);border-color:rgba(255,224,102,.36)}
       .payout-status-failed,.payout-status-uncertain{color:#ff8787;background:rgba(255,107,107,.12);border-color:rgba(255,107,107,.36)}
-      #home-panel-row .recent-payouts-card{display:flex;flex-direction:column;height:100%}
-      #home-panel-row .recent-payouts-card .payout-summary{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin:10px 0 4px}
-      #home-panel-row .recent-payouts-card .payout-summary-item{padding:8px 9px;border:1px solid rgba(101,196,102,.20);border-radius:7px;background:rgba(101,196,102,.04)}
-      #home-panel-row .recent-payouts-card .payout-summary-item span{display:block;color:#91a394;font-size:10px;margin-bottom:2px}
-      #home-panel-row .recent-payouts-card .payout-summary-item strong{font-size:13px;color:#e9f7ea}
-      #home-panel-row .recent-payouts-card .table-wrap{flex:1}
-      #home-panel-row .recent-payouts-card table th,
-      #home-panel-row .recent-payouts-card table td{padding:5px 6px;font-size:11px}
-      #home-panel-row .recent-payouts-card .payout-age{color:#91a394;font-size:10px;white-space:nowrap}
+      .recent-payouts-card{display:flex;flex-direction:column;height:100%}
+      .recent-payouts-card .payout-summary{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin:10px 0 4px}
+      .recent-payouts-card .payout-summary-item{padding:8px 9px;border:1px solid rgba(101,196,102,.20);border-radius:7px;background:rgba(101,196,102,.04)}
+      .recent-payouts-card .payout-summary-item span{display:block;color:#91a394;font-size:10px;margin-bottom:2px}
+      .recent-payouts-card .payout-summary-item strong{font-size:13px;color:#e9f7ea}
+      .recent-payouts-card .table-wrap{flex:1}
+      .recent-payouts-card table th,
+      .recent-payouts-card table td{padding:5px 6px;font-size:11px}
+      .recent-payouts-card .payout-age{color:#91a394;font-size:10px;white-space:nowrap}
       .home-miners-compat-marker{display:none!important}
       .payout-detail{max-width:1100px;margin:0 auto}
       .payout-detail .detail-head{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap}
@@ -101,7 +101,6 @@
     });
 
     row.classList.add('payout-ready');
-    row.style.visibility='visible';
   }
 
   async function renderHome(){
@@ -193,9 +192,25 @@
       if(findTargetSection()) break;
       await new Promise(r=>setTimeout(r,100));
     }
-    const row=homeRow();
-    if(row) row.style.visibility='hidden';
     await renderHome();
+
+    const main=document.querySelector('main#app');
+    if(main){
+      let scheduled=false;
+      new MutationObserver(()=>{
+        if(scheduled) return;
+        scheduled=true;
+        setTimeout(()=>{
+          scheduled=false;
+          const miners=[...main.querySelectorAll('h2')].some(h=>
+            h.textContent.trim()==='Miners' && !h.classList.contains('home-miners-compat-marker')
+          );
+          const payouts=[...main.querySelectorAll('h2')].some(h=>h.textContent.trim()==='Recent Payouts');
+          if(miners || !payouts) renderHome();
+        },0);
+      }).observe(main,{childList:true});
+    }
+
     setInterval(renderHome,15000);
   }
 
