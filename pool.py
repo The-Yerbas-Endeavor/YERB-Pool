@@ -5,13 +5,13 @@ import logging
 from yerbpool.accounting import AccountingDB
 from yerbpool.admin_settings import ensure_runtime_settings, ensure_treasury_address, sync_runtime_settings
 from yerbpool.config import load_config
+from yerbpool.controlled_stratum import ControlledStratumServer
 from yerbpool.fee_accounting import credit_pool_fee
 from yerbpool.ghostrider import ensure_available
 from yerbpool.jobs import JobManager
 from yerbpool.payouts import PayoutManager
 from yerbpool.rpc import YerbasRPC
 from yerbpool.sqlite_safe import install_safe_sqlite_connections
-from yerbpool.stratum import StratumServer
 
 
 async def main():
@@ -41,7 +41,7 @@ async def main():
 
     jobs = JobManager(rpc, cfg)
     payouts = PayoutManager(cfg, rpc, db)
-    server = StratumServer(cfg, rpc, jobs, db, payouts)
+    server = ControlledStratumServer(cfg, rpc, jobs, db, payouts)
     await jobs.start()
     await payouts.start()
     asyncio.create_task(sync_runtime_settings(cfg))
