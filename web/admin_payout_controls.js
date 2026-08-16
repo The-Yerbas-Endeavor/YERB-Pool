@@ -4,8 +4,29 @@
   let state=null;
   let busy=false;
 
+  function placeTreasuryLast(){
+    const main=document.querySelector('main');
+    if(!main) return;
+    const payoutConfig=[...main.querySelectorAll('section')].find(s=>s.querySelector('h2')?.textContent.trim()==='Payout configuration');
+    const treasury=[...main.querySelectorAll('section')].find(s=>s.querySelector('h2')?.textContent.trim()==='Pool Treasury');
+    if(payoutConfig && treasury && payoutConfig.nextElementSibling!==treasury){
+      payoutConfig.insertAdjacentElement('afterend',treasury);
+    }
+  }
+
+  function limitTreasuryActivity(){
+    const root=document.getElementById('treasury-activity');
+    if(!root) return;
+    const rows=[...root.querySelectorAll('tbody tr')];
+    rows.slice(10).forEach(row=>row.remove());
+  }
+
   function ensurePanel(){
-    if(document.getElementById('admin-payout-controls')) return;
+    if(document.getElementById('admin-payout-controls')){
+      placeTreasuryLast();
+      limitTreasuryActivity();
+      return;
+    }
     const main=document.querySelector('main');
     if(!main) return;
     const section=document.createElement('section');
@@ -28,6 +49,8 @@
     else main.appendChild(section);
     section.querySelector('#payout-run-now').addEventListener('click',runNow);
     section.querySelector('#payout-pause-toggle').addEventListener('click',togglePause);
+    placeTreasuryLast();
+    limitTreasuryActivity();
   }
 
   function fmtTime(epoch){
@@ -67,6 +90,8 @@
     pause.disabled=busy || !state.enabled;
     pause.style.opacity=pause.disabled?'.55':'1';
     pause.textContent=state.paused?'Resume payouts':'Pause payouts';
+    placeTreasuryLast();
+    limitTreasuryActivity();
   }
 
   async function refresh(){
@@ -123,6 +148,10 @@
 
   function install(){
     ensurePanel();
+    const treasuryActivity=document.getElementById('treasury-activity');
+    if(treasuryActivity){
+      new MutationObserver(limitTreasuryActivity).observe(treasuryActivity,{childList:true,subtree:true});
+    }
     refresh();
     setInterval(refresh,5000);
     setInterval(render,1000);
