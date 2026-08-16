@@ -140,16 +140,91 @@ def _treasury_snapshot():
         balance = float(rpc.getaccountbalance(account, 1, False))
     except Exception:
         balance = 0.0
+
     with live.base.db() as con:
         history = live.base.rows(
             con,
             "SELECT id,created_at,destination,amount_atomic,txid,status,error FROM treasury_withdrawals ORDER BY id DESC LIMIT 50",
         )
+        accounting = live.base.one(
+            con,
+            """SELECT id,balance_atomic,immature_balance_atomic,total_earned_atomic,total_paid_atomic
+               FROM accounts WHERE address=?""",
+            (address,),
+        )
+        withdrawn = live.base.one(
+            con,
+            """SELECT COALESCE(SUM(amount_atomic),0) withdrawn_atomic
+               FROM treasury_withdrawals WHERE status='sent'""",
+        )
+        ledger = []
+        if accounting:
+            ledger = live.base.rows(
+                con,
+                """SELECT l.id,l.ts,l.block_id,l.entry_type,l.amount_atomic,l.note,b.height
+                   FROM ledger l
+                   LEFT JOIN blocks b ON b.id=l.block_id
+                   WHERE l.account_id=?
+                   ORDER BY l.id DESC LIMIT 75""",
+                (int(accounting["id"]),),
+            )
+
+    immature_atomic = int(accounting.get("immature_balance_atomic") or 0) if accounting else 0
+    mature_earned_atomic = int(accounting.get("total_earned_atomic") or 0) if accounting else 0
+    withdrawn_atomic = int(withdrawn.get("withdrawn_atomic") or 0)
+
+    activity = []
+    for item in ledger:
+        entry_type = str(item.get("entry_type") or "")
+        if entry_type == "block_immature":
+            label = "Fee earned (immature)"
+        elif entry_type == "block_mature":
+            label = "Fee matured"
+        elif entry_type == "block_orphan":
+            label = "Orphan reversal"
+        elif entry_type == "payout":
+            label = "Treasury payout"
+        else:
+            label = entry_type.replace("_", " ").title() or "Ledger entry"
+        activity.append({
+            "ts": int(item.get("ts") or 0),
+            "type": label,
+            "amount_atomic": int(item.get("amount_atomic") or 0),
+            "block_id": item.get("block_id"),
+            "block_height": item.get("height"),
+            "txid": None,
+            "status": None,
+            "note": item.get("note") or "",
+        })
+
+    for item in history:
+        status = str(item.get("status") or "")
+        amount = int(item.get("amount_atomic") or 0)
+        activity.append({
+            "ts": int(item.get("created_at") or 0),
+            "type": "Treasury withdrawal" if status == "sent" else "Withdrawal attempt",
+            "amount_atomic": -amount if status == "sent" else 0,
+            "block_id": None,
+            "block_height": None,
+            "txid": item.get("txid"),
+            "status": status,
+            "note": item.get("error") or item.get("destination") or "",
+        })
+
+    activity.sort(key=lambda item: int(item.get("ts") or 0), reverse=True)
+    activity = activity[:100]
+
     return {
         "address": address,
         "account": account,
         "balance": balance,
         "history": history,
+        "total_fees_earned_atomic": mature_earned_atomic + immature_atomic,
+        "immature_fees_atomic": immature_atomic,
+        "mature_fees_earned_atomic": mature_earned_atomic,
+        "total_withdrawn_atomic": withdrawn_atomic,
+        "accounting_balance_atomic": int(accounting.get("balance_atomic") or 0) if accounting else 0,
+        "activity": activity,
     }
 
 
@@ -211,17 +286,19 @@ def _admin_html():
     return """<!doctype html>
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>YERB Pool Admin</title><link rel="stylesheet" href="/brand.css?v=1">
-<style>body{background:#111;color:#eee;font-family:system-ui,sans-serif;margin:0}main{max-width:1100px;margin:auto;padding:30px}.admin-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:14px}.admin-card{background:#1b1b1b;border:1px solid #303030;border-radius:10px;padding:18px}.admin-card strong{display:block;font-size:24px;margin-top:4px}.form-row{display:flex;gap:12px;align-items:end;flex-wrap:wrap}label{display:block;color:#aaa;font-size:13px;margin-bottom:6px}input{background:#111;color:#fff;border:1px solid #444;border-radius:7px;padding:10px 12px;font-size:16px;width:200px}.wide{width:min(520px,80vw)}button{background:#2b7a3d;color:#fff;border:0;border-radius:7px;padding:11px 18px;font-weight:700;cursor:pointer}.notice{margin-top:12px;color:#9fe3a7}.error{color:#ffaaaa}.muted{color:#aaa}a{color:#9fd3ff}table{width:100%;border-collapse:collapse;margin-top:12px}th,td{padding:9px;border-bottom:1px solid #2d2d2d;text-align:left;font-size:13px}code{word-break:break-all}</style></head>
+<style>body{background:#111;color:#eee;font-family:system-ui,sans-serif;margin:0}main{max-width:1100px;margin:auto;padding:30px}.admin-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:14px}.admin-card{background:#1b1b1b;border:1px solid #303030;border-radius:10px;padding:18px}.admin-card strong{display:block;font-size:24px;margin-top:4px}.form-row{display:flex;gap:12px;align-items:end;flex-wrap:wrap}label{display:block;color:#aaa;font-size:13px;margin-bottom:6px}input{background:#111;color:#fff;border:1px solid #444;border-radius:7px;padding:10px 12px;font-size:16px;width:200px}.wide{width:min(520px,80vw)}button{background:#2b7a3d;color:#fff;border:0;border-radius:7px;padding:11px 18px;font-weight:700;cursor:pointer}.notice{margin-top:12px;color:#9fe3a7}.error{color:#ffaaaa}.muted{color:#aaa}a{color:#9fd3ff}table{width:100%;border-collapse:collapse;margin-top:12px}th,td{padding:9px;border-bottom:1px solid #2d2d2d;text-align:left;font-size:13px}code{word-break:break-all}.amount-positive{color:#9fe3a7}.amount-negative{color:#ffaaaa}.treasury-audit{margin-top:16px}.treasury-audit .admin-card strong{font-size:20px}</style></head>
 <body><main><div style="display:flex;justify-content:space-between;align-items:center;gap:20px;flex-wrap:wrap"><div><h1 style="margin-bottom:4px">YERB Pool Admin</h1><div class="muted">Operational settings and pool treasury</div></div><a href="/">← Public dashboard</a></div>
 <section><h2>Pool status</h2><div class="admin-grid" id="status"><div class="admin-card">Loading…</div></div></section>
 <section><h2>Pool fee</h2><div class="admin-card"><div class="form-row"><div><label for="fee">Pool fee percent</label><input id="fee" type="number" min="0" max="100" step="0.01"></div><button id="save-fee">Save fee</button></div><p class="muted">Future pool fees are credited automatically to the internal Pool Treasury. Existing block allocations are never recalculated.</p><div id="fee-message"></div></div></section>
-<section><h2>Pool Treasury</h2><div class="admin-card"><div class="admin-grid"><div><span class="muted">Treasury Address</span><strong style="font-size:14px"><code id="treasury-address">—</code></strong></div><div><span class="muted">Spendable Balance</span><strong id="treasury-balance">0.00 YERB</strong></div></div><div class="form-row" style="margin-top:18px"><div><label for="withdraw-address">Withdraw to</label><input id="withdraw-address" class="wide" type="text" autocomplete="off" spellcheck="false" placeholder="Destination YERB address"></div><div><label for="withdraw-amount">Amount (YERB)</label><input id="withdraw-amount" type="number" min="0.00000001" step="0.00000001"></div><button id="withdraw">Withdraw</button></div><p class="muted">Withdrawals are signed and broadcast by the pool's Yerbas wallet. The treasury private key is never stored in the web application.</p><div id="withdraw-message"></div><div id="treasury-history"></div></div></section>
+<section><h2>Pool Treasury</h2><div class="admin-card"><div class="admin-grid"><div><span class="muted">Treasury Address</span><strong style="font-size:14px"><code id="treasury-address">—</code></strong></div><div><span class="muted">Current Spendable</span><strong id="treasury-balance">0.00 YERB</strong></div></div><div class="admin-grid treasury-audit" id="treasury-audit"><div class="admin-card">Loading accounting…</div></div><h3 style="margin-top:22px">Treasury Activity</h3><div class="muted">Fee credits and maturity transitions from the accounting ledger, combined with recorded treasury withdrawals.</div><div id="treasury-activity"></div><div class="form-row" style="margin-top:24px"><div><label for="withdraw-address">Withdraw to</label><input id="withdraw-address" class="wide" type="text" autocomplete="off" spellcheck="false" placeholder="Destination YERB address"></div><div><label for="withdraw-amount">Amount (YERB)</label><input id="withdraw-amount" type="number" min="0.00000001" step="0.00000001"></div><button id="withdraw">Withdraw</button></div><p class="muted">Withdrawals are signed and broadcast by the pool's Yerbas wallet. The treasury private key is never stored in the web application.</p><div id="withdraw-message"></div><h3 style="margin-top:22px">Withdrawal History</h3><div id="treasury-history"></div></div></section>
 <section><h2>Payout configuration</h2><div class="admin-grid" id="payouts"></div></section>
 <script>
 const coin=v=>Number(v||0).toFixed(8)+' YERB';
+const atomicCoin=v=>(Number(v||0)/1e8).toFixed(8)+' YERB';
 const when=t=>t?new Date(Number(t)*1000).toLocaleString():'—';
-function renderHistory(items){if(!items?.length)return'<p class="muted">No treasury withdrawals yet.</p>';return `<table><thead><tr><th>Time</th><th>Destination</th><th>Amount</th><th>Status</th><th>TXID</th></tr></thead><tbody>${items.map(x=>`<tr><td>${when(x.created_at)}</td><td><code>${x.destination}</code></td><td>${(Number(x.amount_atomic||0)/1e8).toFixed(8)} YERB</td><td>${x.status}</td><td>${x.txid?`<code>${x.txid}</code>`:'—'}</td></tr>`).join('')}</tbody></table>`}
-async function load(){const r=await fetch('/api/admin/settings',{cache:'no-store'});if(!r.ok)throw new Error(await r.text());const x=await r.json();document.getElementById('fee').value=Number(x.pool_fee_percent||0).toFixed(2);const s=x.summary||{},w=x.wallet||{},t=x.treasury||{};document.getElementById('status').innerHTML=`<div class="admin-card"><span class="muted">Wallet Balance</span><strong>${Number(w.balance||0).toFixed(2)} YERB</strong></div><div class="admin-card"><span class="muted">Immature Wallet</span><strong>${Number(w.immature_balance||0).toFixed(2)} YERB</strong></div><div class="admin-card"><span class="muted">Active Workers</span><strong>${s.workers?.active_workers??0}</strong></div><div class="admin-card"><span class="muted">Pending Blocks</span><strong>${s.blocks?.pending??0}</strong></div><div class="admin-card"><span class="muted">Total Paid</span><strong>${(Number(s.payouts?.paid_atomic||0)/1e8).toFixed(2)} YERB</strong></div>`;document.getElementById('treasury-address').textContent=t.address||'—';document.getElementById('treasury-balance').textContent=coin(t.balance);document.getElementById('treasury-history').innerHTML=renderHistory(t.history);document.getElementById('payouts').innerHTML=`<div class="admin-card"><span class="muted">Minimum Payout</span><strong>${x.minimum_payout} YERB</strong></div><div class="admin-card"><span class="muted">Payment Check</span><strong>${x.check_interval_seconds}s</strong></div><div class="admin-card"><span class="muted">Coinbase Maturity</span><strong>${x.coinbase_maturity} blocks</strong></div>`;}
+function renderHistory(items){if(!items?.length)return'<p class="muted">No treasury withdrawals yet.</p>';return `<table><thead><tr><th>Time</th><th>Destination</th><th>Amount</th><th>Status</th><th>TXID</th></tr></thead><tbody>${items.map(x=>`<tr><td>${when(x.created_at)}</td><td><code>${x.destination}</code></td><td>${atomicCoin(x.amount_atomic)}</td><td>${x.status}</td><td>${x.txid?`<code>${x.txid}</code>`:'—'}</td></tr>`).join('')}</tbody></table>`}
+function renderActivity(items){if(!items?.length)return'<p class="muted">No treasury accounting activity yet.</p>';return `<table><thead><tr><th>Time</th><th>Type</th><th>Amount</th><th>Block / TX</th><th>Note</th></tr></thead><tbody>${items.map(x=>{const amount=Number(x.amount_atomic||0),cls=amount>0?'amount-positive':amount<0?'amount-negative':'';const ref=x.block_height?`Block ${x.block_height}`:x.txid?`<code>${x.txid}</code>`:'—';return `<tr><td>${when(x.ts)}</td><td>${x.type||'—'}${x.status?` <span class="muted">(${x.status})</span>`:''}</td><td class="${cls}">${amount>0?'+':''}${atomicCoin(amount)}</td><td>${ref}</td><td>${x.note||'—'}</td></tr>`}).join('')}</tbody></table>`}
+async function load(){const r=await fetch('/api/admin/settings',{cache:'no-store'});if(!r.ok)throw new Error(await r.text());const x=await r.json();document.getElementById('fee').value=Number(x.pool_fee_percent||0).toFixed(2);const s=x.summary||{},w=x.wallet||{},t=x.treasury||{};document.getElementById('status').innerHTML=`<div class="admin-card"><span class="muted">Wallet Balance</span><strong>${Number(w.balance||0).toFixed(2)} YERB</strong></div><div class="admin-card"><span class="muted">Immature Wallet</span><strong>${Number(w.immature_balance||0).toFixed(2)} YERB</strong></div><div class="admin-card"><span class="muted">Active Workers</span><strong>${s.workers?.active_workers??0}</strong></div><div class="admin-card"><span class="muted">Pending Blocks</span><strong>${s.blocks?.pending??0}</strong></div><div class="admin-card"><span class="muted">Total Paid</span><strong>${(Number(s.payouts?.paid_atomic||0)/1e8).toFixed(2)} YERB</strong></div>`;document.getElementById('treasury-address').textContent=t.address||'—';document.getElementById('treasury-balance').textContent=coin(t.balance);document.getElementById('treasury-audit').innerHTML=`<div class="admin-card"><span class="muted">Total Fees Earned</span><strong>${atomicCoin(t.total_fees_earned_atomic)}</strong></div><div class="admin-card"><span class="muted">Immature Fees</span><strong>${atomicCoin(t.immature_fees_atomic)}</strong></div><div class="admin-card"><span class="muted">Mature Fees Earned</span><strong>${atomicCoin(t.mature_fees_earned_atomic)}</strong></div><div class="admin-card"><span class="muted">Total Withdrawn</span><strong>${atomicCoin(t.total_withdrawn_atomic)}</strong></div><div class="admin-card"><span class="muted">Current Spendable</span><strong>${coin(t.balance)}</strong></div>`;document.getElementById('treasury-activity').innerHTML=renderActivity(t.activity);document.getElementById('treasury-history').innerHTML=renderHistory(t.history);document.getElementById('payouts').innerHTML=`<div class="admin-card"><span class="muted">Minimum Payout</span><strong>${x.minimum_payout} YERB</strong></div><div class="admin-card"><span class="muted">Payment Check</span><strong>${x.check_interval_seconds}s</strong></div><div class="admin-card"><span class="muted">Coinbase Maturity</span><strong>${x.coinbase_maturity} blocks</strong></div>`;}
 document.getElementById('save-fee').onclick=async()=>{const message=document.getElementById('fee-message');message.className='';message.textContent='Saving…';try{const fee=Number(document.getElementById('fee').value);const r=await fetch('/api/admin/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({pool_fee_percent:fee})});const x=await r.json();if(!r.ok)throw new Error(x.error||'Save failed');message.className='notice';message.textContent=`Pool fee updated to ${Number(x.pool_fee_percent).toFixed(2)}%. Applies to the next block.`;await load();}catch(e){message.className='error';message.textContent=e.message;}};
 document.getElementById('withdraw').onclick=async()=>{const message=document.getElementById('withdraw-message');message.className='';message.textContent='Broadcasting withdrawal…';try{const destination=document.getElementById('withdraw-address').value.trim();const amount=document.getElementById('withdraw-amount').value;const r=await fetch('/api/admin/treasury/withdraw',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({destination,amount})});const x=await r.json();if(!r.ok)throw new Error(x.error||'Withdrawal failed');message.className='notice';message.textContent=`Withdrawal sent. TXID: ${x.txid}`;document.getElementById('withdraw-amount').value='';await load();}catch(e){message.className='error';message.textContent=e.message;}};
 load().catch(e=>{document.getElementById('status').innerHTML=`<div class="admin-card error">${e.message}</div>`});
