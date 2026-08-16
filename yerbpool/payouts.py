@@ -6,6 +6,7 @@ from decimal import Decimal, ROUND_DOWN
 from pathlib import Path
 
 from yerbpool.database import COIN
+from yerbpool.payout_control import consume_request, finish_request, read_control
 
 
 class PayoutManager:
@@ -42,11 +43,14 @@ class PayoutManager:
         self.next_payout_check_at = 0
         self.last_payout_check_at = 0
         self.last_payout_result = "waiting"
+        self.paused = bool(read_control().get("paused", False))
+        self._payout_lock = asyncio.Lock()
 
     def _write_status(self, **extra):
         """Atomically publish read-only payout scheduler state for the dashboard."""
         data = {
             "enabled": self.enabled,
+            "paused": self.paused,
             "interval_seconds": self.payout_interval,
             "minimum_payout_atomic": self.minimum_atomic,
             "next_check_at": int(self.next_payout_check_at or 0),
@@ -64,12 +68,14 @@ class PayoutManager:
 
     async def start(self):
         logging.info(
-            "Payout scheduler enabled=%s interval=%ss block_check=%ss",
+            "Payout scheduler enabled=%s paused=%s interval=%ss block_check=%ss",
             self.enabled,
+            self.paused,
             self.payout_interval,
             self.block_check_interval,
         )
         asyncio.create_task(self._block_loop())
+        asyncio.create_task(self._control_loop())
         if self.enabled:
             self.next_payout_check_at = int(time.time()) + self.payout_interval
             self._write_status()
@@ -85,6 +91,24 @@ class PayoutManager:
                 logging.exception("Block maturity cycle failed")
             await asyncio.sleep(self.block_check_interval)
 
+    async def _run_payout_check(self, source="scheduled"):
+        async with self._payout_lock:
+            self.last_payout_check_at = int(time.time())
+            if self.paused:
+                self.last_payout_result = "paused"
+                self._write_status(last_source=source)
+                return "paused"
+            try:
+                result = await self.process_payouts()
+                self.last_payout_result = result or "checked"
+                return self.last_payout_result
+            except Exception:
+                self.last_payout_result = "error"
+                logging.exception("Payout cycle failed source=%s", source)
+                raise
+            finally:
+                self._write_status(last_source=source)
+
     async def _payout_loop(self):
         # Wait one full payout interval before the first scheduled batch after
         # service startup. This prevents a restart from causing an immediate
@@ -92,16 +116,61 @@ class PayoutManager:
         while True:
             delay = max(1, int(self.next_payout_check_at - time.time()))
             await asyncio.sleep(delay)
-            self.last_payout_check_at = int(time.time())
             try:
-                result = await self.process_payouts()
-                self.last_payout_result = result or "checked"
+                await self._run_payout_check("scheduled")
             except Exception:
-                self.last_payout_result = "error"
-                logging.exception("Payout cycle failed")
+                pass
             finally:
                 self.next_payout_check_at = int(time.time()) + self.payout_interval
                 self._write_status()
+
+    async def _control_loop(self):
+        """Apply runtime pause state and consume authenticated admin requests."""
+        while True:
+            try:
+                control = read_control()
+                paused = bool(control.get("paused", False))
+                if paused != self.paused:
+                    self.paused = paused
+                    logging.warning("ADMIN PAYOUTS %s", "PAUSED" if paused else "RESUMED")
+                    self._write_status()
+
+                request = consume_request()
+                if request:
+                    request_id = str(request.get("request_id") or "unknown")
+                    requested_at = int(request.get("requested_at") or time.time())
+                    if self.paused:
+                        result = "paused"
+                        ok = False
+                        error = "Payouts are paused"
+                    elif not self.enabled:
+                        result = "disabled"
+                        ok = False
+                        error = "Payout scheduler is disabled"
+                    else:
+                        logging.warning("ADMIN PAYOUT CHECK requested id=%s", request_id)
+                        try:
+                            result = await self._run_payout_check("admin")
+                            ok = result != "paused"
+                            error = None
+                        except Exception as exc:
+                            result = "error"
+                            ok = False
+                            error = str(exc)[:300]
+                    payload = {
+                        "request_id": request_id,
+                        "requested_at": requested_at,
+                        "completed_at": int(time.time()),
+                        "ok": ok,
+                        "result": result,
+                    }
+                    if error:
+                        payload["error"] = error
+                    finish_request(payload)
+                    logging.warning("ADMIN PAYOUT CHECK completed id=%s result=%s", request_id, result)
+            except Exception:
+                logging.exception("Payout control loop failed")
+            await asyncio.sleep(1)
 
     async def process_blocks(self):
         for block in self.db.pending_blocks():
