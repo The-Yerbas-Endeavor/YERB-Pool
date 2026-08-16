@@ -1,8 +1,8 @@
-"""Runtime-only control channel for payout administration.
+"""Runtime control channel for payout administration.
 
-Control/request files live outside the public web root.  The web process may
-request an action, but only the pool daemon consumes requests and executes
-payout logic.
+The pause flag is persisted in the pool settings database. Transient run-now
+requests live outside the public web root and are consumed only by the pool
+daemon, which remains the sole process that executes payout logic.
 """
 
 import json
@@ -10,9 +10,11 @@ import time
 import uuid
 from pathlib import Path
 
+from yerbpool.admin_settings import get_setting, set_setting
 
+
+PAUSED_KEY = "payouts_paused"
 RUNTIME_DIR = Path("runtime")
-CONTROL_PATH = RUNTIME_DIR / "payout_control.json"
 REQUEST_PATH = RUNTIME_DIR / "payout_request.json"
 PROCESSING_PATH = RUNTIME_DIR / "payout_request.processing.json"
 RESULT_PATH = RUNTIME_DIR / "payout_result.json"
@@ -33,21 +35,18 @@ def _write_json(path, payload):
     tmp.replace(path)
 
 
-def read_control():
-    data = _read_json(CONTROL_PATH)
+def read_control(cfg):
+    raw = str(get_setting(cfg, PAUSED_KEY, "0") or "0").strip().lower()
+    return {"paused": raw in ("1", "true", "yes", "on")}
+
+
+def set_paused(cfg, paused):
+    value = bool(paused)
+    set_setting(cfg, PAUSED_KEY, "1" if value else "0")
     return {
-        "paused": bool(data.get("paused", False)),
-        "updated_at": int(data.get("updated_at") or 0),
-    }
-
-
-def set_paused(paused):
-    data = {
-        "paused": bool(paused),
+        "paused": value,
         "updated_at": int(time.time()),
     }
-    _write_json(CONTROL_PATH, data)
-    return data
 
 
 def request_run_now():
