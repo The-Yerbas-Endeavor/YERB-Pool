@@ -67,7 +67,7 @@
   }
 
   function homeRow(){
-    return document.getElementById('home-panel-row');
+    return document.getElementById('home-panel-row') || document.querySelector('main#app');
   }
 
   function headingSection(label,root=document){
