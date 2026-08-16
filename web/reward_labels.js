@@ -28,6 +28,16 @@
     return labels[value] || value;
   }
 
+  function payoutLedgerNote(note, type) {
+    const text=String(note||'');
+    if(type!=='payout') return esc(text);
+    const match=text.match(/\b[0-9a-fA-F]{64}\b/);
+    if(!match) return esc(text);
+    const txid=match[0];
+    const index=match.index||0;
+    return `${esc(text.slice(0,index))}<a href="${EXPLORER}/tx/${encodeURIComponent(txid)}" target="_blank" rel="noopener"><code>${esc(txid)}</code></a>${esc(text.slice(index+txid.length))}`;
+  }
+
   function removeShareSummaryCards() {
     if(location.pathname!=='/') return;
     document.querySelectorAll('main#app .card').forEach(card=>{
@@ -200,7 +210,7 @@
     await originalAccount(); const a=decodeURIComponent(location.pathname.slice('/account/'.length)); if(!a) return; const x=await get('/api/account/'+encodeURIComponent(a)).catch(()=>null); if(!x) return;
     document.querySelectorAll('.card .muted').forEach(el=>{if(el.textContent.trim()==='Balance') el.textContent='Mature Balance';if(el.textContent.trim()==='Immature' || el.textContent.trim()==='Immature Balance') el.textContent='Immature Balance';});
     const ledgerHeading=[...document.querySelectorAll('h2')].find(h=>h.textContent.trim()==='Ledger');
-    if(ledgerHeading){const section=ledgerHeading.closest('section');const ledger=x.ledger||[];const blockMap=new Map();const blocks=await get('/api/blocks?limit=500').catch(()=>[]);for(const b of blocks) blockMap.set(Number(b.id),b);const body=ledger.length?table(['Time','Type','Amount','Block','Note'],ledger.map(l=>{const b=blockMap.get(Number(l.block_id));let note=l.note||'';if(l.entry_type==='block_immature'){const network=b?coin(b.network_reward_atomic||8000000000):'80.00';const pool=b?coin(b.reward_atomic):coin(l.amount_atomic);note=`Miner share of ${pool} YERB pool reward; ${network} YERB network reward. Matures after ${REQUIRED_CONFIRMATIONS} confirmations.`;}else if(l.entry_type==='block_mature'){note='Reward reached 100 confirmations and moved to mature balance.';}else if(l.entry_type==='block_orphan'){note='Previously pending reward removed because the block was orphaned.';}return `<tr><td>${when(l.ts)}</td><td>${status(friendlyLedgerType(l.entry_type))}</td><td>${coin(l.amount_atomic)} YERB</td><td>${l.block_id??'—'}</td><td>${esc(note)}</td></tr>`;})):'<div class="empty">No ledger entries.</div>';if(section) section.innerHTML='<h2>Ledger</h2>'+body;}
+    if(ledgerHeading){const section=ledgerHeading.closest('section');const ledger=x.ledger||[];const blockMap=new Map();const blocks=await get('/api/blocks?limit=500').catch(()=>[]);for(const b of blocks) blockMap.set(Number(b.id),b);const body=ledger.length?table(['Time','Type','Amount','Block','Note'],ledger.map(l=>{const b=blockMap.get(Number(l.block_id));let note=l.note||'';if(l.entry_type==='block_immature'){const network=b?coin(b.network_reward_atomic||8000000000):'80.00';const pool=b?coin(b.reward_atomic):coin(l.amount_atomic);note=`Miner share of ${pool} YERB pool reward; ${network} YERB network reward. Matures after ${REQUIRED_CONFIRMATIONS} confirmations.`;}else if(l.entry_type==='block_mature'){note='Reward reached 100 confirmations and moved to mature balance.';}else if(l.entry_type==='block_orphan'){note='Previously pending reward removed because the block was orphaned.';}return `<tr><td>${when(l.ts)}</td><td>${status(friendlyLedgerType(l.entry_type))}</td><td>${coin(l.amount_atomic)} YERB</td><td>${l.block_id??'—'}</td><td>${payoutLedgerNote(note,l.entry_type)}</td></tr>`;})):'<div class="empty">No ledger entries.</div>';if(section) section.innerHTML='<h2>Ledger</h2>'+body;}
     await ensureAccountRejectBreakdown();
   };
 
