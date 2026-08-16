@@ -215,7 +215,31 @@
   };
 
   window.shares = async function(){
-    const q=new URLSearchParams(location.search),statusQ=q.get('status'),address=q.get('address'),params=new URLSearchParams({limit:'1000'});if(statusQ)params.set('status',statusQ);if(address)params.set('address',address);const s=await get('/api/shares?'+params);const headers=['Time','Address / Worker','Difficulty','Result'];if(statusQ==='rejected' || s.some(x=>x.rejection_reason)) headers.push('Reason');headers.push('Block Candidate','Hash');const rows=s.map(x=>{const cells=[`<td>${when(x.ts)}</td>`,`<td>${x.address?addressLink(x.address):''}<div><code>${esc(x.worker)}</code></div></td>`,`<td>${Number(x.difficulty).toExponential(4)}</td>`,`<td>${x.accepted?'<span class="ok">Accepted</span>':'<span class="bad">Rejected</span>'}</td>`];if(statusQ==='rejected' || s.some(y=>y.rejection_reason)) cells.push(`<td>${x.accepted?'—':esc(friendlyRejectReason(x.rejection_reason))}</td>`);cells.push(`<td>${x.block_candidate?'Yes':'No'}</td>`,`<td><code>${esc(short(x.hash))}</code></td>`);return '<tr>'+cells.join('')+'</tr>';});app.innerHTML=`<section><h2>${statusQ?statusQ[0].toUpperCase()+statusQ.slice(1)+' ':''}Shares</h2>${address?`<div class="muted">Address: ${addressLink(address)}</div>`:''}${s.length?table(headers,rows):'<div class="empty">No shares recorded.</div>'}</section>`;
+    const q=new URLSearchParams(location.search),statusQ=q.get('status'),address=q.get('address'),params=new URLSearchParams({limit:'1000'});
+    if(statusQ) params.set('status',statusQ);
+    if(address) params.set('address',address);
+    const all=await get('/api/shares?'+params);
+    const rejectedPage=statusQ==='rejected';
+    const pageSize=rejectedPage?10:1000;
+    const requestedPage=Math.max(1,parseInt(q.get('page')||'1',10)||1);
+    const totalPages=Math.max(1,Math.ceil(all.length/pageSize));
+    const page=Math.min(requestedPage,totalPages);
+    const s=all.slice((page-1)*pageSize,page*pageSize);
+    const headers=['Time','Address / Worker','Difficulty','Result'];
+    if(statusQ==='rejected' || all.some(x=>x.rejection_reason)) headers.push('Reason');
+    headers.push('Block Candidate','Hash');
+    const rows=s.map(x=>{
+      const cells=[`<td>${when(x.ts)}</td>`,`<td>${x.address?addressLink(x.address):''}<div><code>${esc(x.worker)}</code></div></td>`,`<td>${Number(x.difficulty).toExponential(4)}</td>`,`<td>${x.accepted?'<span class="ok">Accepted</span>':'<span class="bad">Rejected</span>'}</td>`];
+      if(statusQ==='rejected' || all.some(y=>y.rejection_reason)) cells.push(`<td>${x.accepted?'—':esc(friendlyRejectReason(x.rejection_reason))}</td>`);
+      cells.push(`<td>${x.block_candidate?'Yes':'No'}</td>`,`<td><code>${esc(short(x.hash))}</code></td>`);
+      return '<tr>'+cells.join('')+'</tr>';
+    });
+    let pager='';
+    if(rejectedPage && all.length){
+      const makeHref=p=>{const next=new URLSearchParams(q);next.set('page',String(p));return '/shares?'+next.toString();};
+      pager=`<div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-top:14px"><span class="muted small">Page ${page} of ${totalPages} · ${all.length.toLocaleString()} recent rejected shares</span><div style="display:flex;gap:10px">${page>1?`<a class="badge" href="${makeHref(page-1)}">← Previous</a>`:''}${page<totalPages?`<a class="badge" href="${makeHref(page+1)}">Next →</a>`:''}</div></div>`;
+    }
+    app.innerHTML=`<section><h2>${statusQ?statusQ[0].toUpperCase()+statusQ.slice(1)+' ':''}Shares</h2>${address?`<div class="muted">Address: ${addressLink(address)}</div>`:''}${s.length?table(headers,rows):'<div class="empty">No shares recorded.</div>'}${pager}</section>`;
   };
 
   const appRoot=document.querySelector('main#app');
