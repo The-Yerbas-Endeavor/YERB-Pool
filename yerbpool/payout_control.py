@@ -11,6 +11,7 @@ import uuid
 from pathlib import Path
 
 from yerbpool.admin_settings import get_setting, set_setting
+from yerbpool.config import load_config
 
 
 PAUSED_KEY = "payouts_paused"
@@ -35,14 +36,18 @@ def _write_json(path, payload):
     tmp.replace(path)
 
 
-def read_control(cfg):
-    raw = str(get_setting(cfg, PAUSED_KEY, "0") or "0").strip().lower()
+def _cfg(cfg=None):
+    return cfg if cfg is not None else load_config()
+
+
+def read_control(cfg=None):
+    raw = str(get_setting(_cfg(cfg), PAUSED_KEY, "0") or "0").strip().lower()
     return {"paused": raw in ("1", "true", "yes", "on")}
 
 
-def set_paused(cfg, paused):
+def set_paused(paused, cfg=None):
     value = bool(paused)
-    set_setting(cfg, PAUSED_KEY, "1" if value else "0")
+    set_setting(_cfg(cfg), PAUSED_KEY, "1" if value else "0")
     return {
         "paused": value,
         "updated_at": int(time.time()),
