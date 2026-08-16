@@ -1,5 +1,6 @@
 (function(){
   const REQUIRED_CONFIRMATIONS=100;
+  const PAGE_BLOCK_LIMIT=100;
 
   function ensureStyles(){
     if(document.getElementById('yerb-block-presentation-style')) return;
@@ -66,10 +67,11 @@
   }
 
   function fullTable(blocks){
-    if(!blocks.length) return '<div class="empty">No blocks found yet.</div>';
+    const shown=blocks.slice(0,PAGE_BLOCK_LIMIT);
+    if(!shown.length) return '<div class="empty">No blocks found yet.</div>';
     return table(
       ['Height','Found','Status','Maturity','Pool Reward','Finder','Hash'],
-      blocks.map(x=>{
+      shown.map(x=>{
         const state=blockState(x);
         return `<tr>
           <td><strong>${x.height??'—'}</strong></td>
@@ -128,7 +130,7 @@
           .find(h=>h.textContent.trim()===(pending?'Pending Blocks':'Blocks'));
         const section=heading?.closest('section');
         if(!section) return;
-        const blocks=await get('/api/blocks?limit=500'+(pending?'&status=pending':''));
+        const blocks=await get('/api/blocks?limit='+PAGE_BLOCK_LIMIT+(pending?'&status=pending':''));
         const old=section.querySelector('.table-wrap,.empty');
         const holder=document.createElement('div');
         holder.innerHTML=fullTable(blocks);
