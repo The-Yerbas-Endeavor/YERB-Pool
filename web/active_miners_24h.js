@@ -18,4 +18,10 @@
       return originalWorkerBars((workers||[]).filter(recentlyActive));
     };
   }
+
+  if(location.pathname==='/miners' && typeof window.miners==='function'){
+    window.miners();
+  }else if(location.pathname==='/' && typeof window.dashboard==='function'){
+    window.dashboard();
+  }
 })();
