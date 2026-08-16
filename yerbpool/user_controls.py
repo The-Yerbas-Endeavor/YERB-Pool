@@ -84,33 +84,40 @@ def record_worker_ip(pool_db, login, ip_address):
 
 def list_users(path, hashrate_window=600, treasury_address=None):
     ensure_user_control_schema(path)
-    now = int(time.time())
-    cutoff = now - max(60, int(hashrate_window))
-    params = [cutoff, cutoff]
+    cutoff = int(time.time()) - max(60, int(hashrate_window))
     treasury_clause = ""
+    params = [cutoff, cutoff]
     if treasury_address:
         treasury_clause = "WHERE a.address != ?"
         params.append(str(treasury_address))
+
     with _connect(path) as con:
         users = [dict(row) for row in con.execute(
             f"""SELECT a.id,a.address,a.created_at,a.updated_at,a.balance_atomic,
                        a.immature_balance_atomic,a.total_earned_atomic,a.total_paid_atomic,
                        a.minimum_payout_atomic,a.enabled,
-                       COUNT(DISTINCT w.id) worker_count,
-                       COALESCE(SUM(CASE WHEN w.last_seen_at>=? THEN 1 ELSE 0 END),0) active_workers,
-                       COALESCE(MAX(w.last_seen_at),0) last_seen_at,
-                       COALESCE(MAX(s.ts),0) last_share_at,
-                       COALESCE(SUM(CASE WHEN s.accepted=1 AND s.ts>=? THEN s.difficulty ELSE 0 END),0) accepted_diff
+                       (SELECT COUNT(*) FROM workers w WHERE w.account_id=a.id) worker_count,
+                       (SELECT COUNT(*) FROM workers w WHERE w.account_id=a.id AND w.last_seen_at>=?) active_workers,
+                       COALESCE((SELECT MAX(w.last_seen_at) FROM workers w WHERE w.account_id=a.id),0) last_seen_at,
+                       COALESCE((SELECT SUM(w.accepted_shares) FROM workers w WHERE w.account_id=a.id),0) accepted_shares,
+                       COALESCE((SELECT SUM(w.rejected_shares) FROM workers w WHERE w.account_id=a.id),0) rejected_shares,
+                       COALESCE((SELECT MAX(s.ts) FROM shares s WHERE s.account_id=a.id),0) last_share_at,
+                       COALESCE((SELECT SUM(s.difficulty) FROM shares s WHERE s.account_id=a.id AND s.accepted=1 AND s.ts>=?),0) accepted_diff
                 FROM accounts a
-                LEFT JOIN workers w ON w.account_id=a.id
-                LEFT JOIN shares s ON s.account_id=a.id
                 {treasury_clause}
-                GROUP BY a.id
                 ORDER BY last_seen_at DESC,a.id DESC""",
             tuple(params),
         ).fetchall()]
+
         for user in users:
-            ips = [dict(row) for row in con.execute(
+            aid = int(user["id"])
+            user["worker_names"] = [
+                row[0] for row in con.execute(
+                    "SELECT name FROM workers WHERE account_id=? ORDER BY last_seen_at DESC,name LIMIT 12",
+                    (aid,),
+                ).fetchall()
+            ]
+            user["ips"] = [dict(row) for row in con.execute(
                 """SELECT h.ip_address,MAX(h.last_seen_at) last_seen_at,
                           SUM(h.connection_count) connection_count,
                           CASE WHEN b.ip_address IS NULL THEN 0 ELSE 1 END banned
@@ -119,9 +126,8 @@ def list_users(path, hashrate_window=600, treasury_address=None):
                    WHERE h.account_id=?
                    GROUP BY h.ip_address
                    ORDER BY last_seen_at DESC""",
-                (int(user["id"]),),
+                (aid,),
             ).fetchall()]
-            user["ips"] = ips
         return users
 
 
