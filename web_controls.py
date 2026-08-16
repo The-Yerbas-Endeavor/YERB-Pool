@@ -29,6 +29,14 @@ def _control_snapshot():
     }
 
 
+def _admin_snapshot():
+    data = enhanced.admin._admin_snapshot()
+    treasury = data.get("treasury") or {}
+    treasury["activity"] = list(treasury.get("activity") or [])[:10]
+    data["treasury"] = treasury
+    return data
+
+
 class ControlHandler(enhanced.EnhancedHandler):
     def do_GET(self):
         path = urlparse(self.path).path.rstrip("/") or "/"
@@ -42,6 +50,10 @@ class ControlHandler(enhanced.EnhancedHandler):
                     '<script src="/admin_payout_controls.js?v=1"></script></body>',
                 )
             return self._send_html(html)
+        if path == "/api/admin/settings":
+            if not self._require_admin():
+                return
+            return self.send_json(_admin_snapshot())
         if path == "/api/admin/payouts/control":
             if not self._require_admin():
                 return
