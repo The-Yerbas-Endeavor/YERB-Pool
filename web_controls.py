@@ -14,6 +14,9 @@ from yerbpool.payout_control import (
 )
 
 
+enhanced.admin.live.base.LUCK_SCRIPT += '<script src="/active_miners_24h.js?v=1"></script>'
+
+
 def _control_snapshot():
     scheduler = enhanced.read_payout_status(enhanced.ROOT)
     control = read_control()
