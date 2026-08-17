@@ -74,8 +74,9 @@ class PreloadedControlHandler(controls.ControlHandler):
         text = text.replace("if(location.pathname.startsWith('/worker/'))setInterval(worker,30000);", "")
         text = text.replace("if(location.pathname.startsWith('/account/'))setInterval(account,30000);", "")
 
-        # Start this fetch before the large inline dashboard script is parsed and
-        # before its Promise.all() launches the rest of the API requests.
+        # Launch the chart request before dashboard Promise.all() consumes the
+        # browser connection pool. The bridge below makes the normal chart
+        # renderer reuse this exact promise instead of issuing a second request.
         preload = '''<script>
 if(location.pathname==='/'){
   window.__YERB_HASHRATE_PRELOAD__=fetch('/api/hashrate/chart?hours=24&bucket=600',{
@@ -88,9 +89,10 @@ if(location.pathname==='/'){
             '<link rel="stylesheet" href="/brand.css?v=1">' + preload + "</head>",
         )
 
+        bridge = '<script src="/hashrate_preload_bridge.js?v=1"></script>'
         body = text.replace(
             "</body>",
-            base.LUCK_SCRIPT + '<script src="/reward_labels.js?v=6"></script></body>',
+            bridge + base.LUCK_SCRIPT + '<script src="/reward_labels.js?v=6"></script></body>',
         ).encode()
 
         self.send_response(200)
