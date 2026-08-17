@@ -15,6 +15,7 @@
   let selectedRange='24H';
   let busy=false;
   let pending=false;
+  let preload=null;
 
   function cards(){return [...document.querySelectorAll('main#app .chart-card')];}
   function findCard(title){return cards().find(c=>c.querySelector('h3')?.textContent.trim()===title)||null;}
@@ -33,6 +34,11 @@
       pool.innerHTML=`<div class="hash-head"><div><h3>Network Hash vs Pool Hash</h3><div class="muted small">Pool and Yerbas network hashrate over the selected time range.</div></div><div class="hash-range">${Object.keys(RANGES).map(k=>`<button type="button" disabled class="${k===selectedRange?'active':''}">${k}</button>`).join('')}</div></div><div class="hash-loading">Loading hashrate history…</div>`;
     }
     return pool;
+  }
+
+  function fetchSnapshot(range){
+    const r=RANGES[range];
+    return get(`/api/hashrate/chart?hours=${r.hours}&bucket=${r.bucket}&_=${Date.now()}`).catch(()=>null);
   }
 
   function readSamples(){try{const a=JSON.parse(localStorage.getItem(STORAGE_KEY)||'[]');return Array.isArray(a)?a:[];}catch(_){return [];}}
@@ -101,18 +107,32 @@
     svg.addEventListener('mousemove',e=>show(e.clientX));svg.addEventListener('mouseleave',()=>{tip.hidden=true;cross.style.opacity='0';});svg.addEventListener('touchmove',e=>{if(e.touches[0])show(e.touches[0].clientX);},{passive:true});
   }
 
-  function bindRange(card){card.querySelectorAll('[data-range]').forEach(btn=>{btn.onclick=()=>{const next=btn.dataset.range;if(!RANGES[next]||next===selectedRange)return;selectedRange=next;render(true);};});}
+  function bindRange(card){
+    card.querySelectorAll('[data-range]').forEach(btn=>{
+      btn.onclick=()=>{
+        const next=btn.dataset.range;
+        if(!RANGES[next]||next===selectedRange)return;
+        selectedRange=next;
+        preload=fetchSnapshot(selectedRange);
+        render(true);
+      };
+    });
+  }
 
   async function render(force=false){
     if(busy){pending=true;return;}
-    const card=combinedCard();if(!card)return;busy=true;
+    const card=combinedCard();if(!card)return;
+    busy=true;
     try{
+      const request=preload||fetchSnapshot(selectedRange);
+      preload=null;
+      const data=await request;
+      const history=Array.isArray(data?.history)?data.history:[];
+      if(!history.length||!data){card.innerHTML='<div class="hash-head"><div><h3>Network Hash vs Pool Hash</h3><div class="muted small">Hashrate history is temporarily unavailable.</div></div></div><div class="hash-loading">Waiting for hashrate data…</div>';return;}
+      const difficulty=Number(data.network_difficulty||0);
+      const networkNow=Number(data.network_hashrate||0) || (difficulty>0?difficulty*DIFF1_HASHES/BLOCK_TARGET_SECONDS:0);
+      const poolNow=Number(data.pool_hashrate||0);
       const r=RANGES[selectedRange];
-      const [history,luck]=await Promise.all([get(`/api/pool/history?hours=${r.hours}&bucket=${r.bucket}&_=${Date.now()}`).catch(()=>[]),get(`/api/luck?_=${Date.now()}`).catch(()=>null)]);
-      if(!history.length||!luck){card.innerHTML='<div class="hash-head"><div><h3>Network Hash vs Pool Hash</h3><div class="muted small">Hashrate history is temporarily unavailable.</div></div></div><div class="hash-loading">Waiting for hashrate data…</div>';return;}
-      const difficulty=Number(luck.network_difficulty||0);
-      const networkNow=Number(luck.network_hashrate||0) || (difficulty>0?difficulty*DIFF1_HASHES/BLOCK_TARGET_SECONDS:0);
-      const poolNow=Number(luck.pool_hashrate||0);
       const allSamples=saveNetworkSample(networkNow),cutoff=Math.floor(Date.now()/1000)-r.hours*3600,samples=allSamples.filter(x=>Number(x.ts)>=cutoff);
       const poolVals=history.map(x=>Number(x.hashrate||0)),netVals=history.map(x=>networkAt(samples,Number(x.ts||0),networkNow)),p=calcStats(poolVals),n=calcStats(netVals),share=networkNow>0?poolNow/networkNow*100:0;
       styles();
@@ -122,10 +142,15 @@
   }
 
   function install(){
-    styles();const app=document.querySelector('main#app');let started=false;
+    styles();
+    // Start the expensive history/RPC request immediately, in parallel with
+    // the rest of dashboard loading. By the time the chart card is inserted,
+    // its data is usually already waiting to be painted.
+    preload=fetchSnapshot(selectedRange);
+    const app=document.querySelector('main#app');let started=false;
     const start=()=>{const card=combinedCard();if(!card)return false;if(!started){started=true;render();}return true;};
     if(!start()&&app){const observer=new MutationObserver(()=>{if(start())observer.disconnect();});observer.observe(app,{childList:true,subtree:true});}
-    setInterval(()=>render(),15000);
+    setInterval(()=>{preload=fetchSnapshot(selectedRange);render();},15000);
   }
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',install);else install();
 })();
