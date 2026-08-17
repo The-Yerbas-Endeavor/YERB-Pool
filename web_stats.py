@@ -2,13 +2,12 @@
 """YERB Pool dashboard runtime with live production metrics.
 
 All live/current hashrate values use one authoritative rolling 2-minute
-accepted-share difficulty estimator. Historical graphs remain bucketed for
-trend display, but never provide the headline/current hashrate numbers.
+accepted-share difficulty estimator. Historical graphs use pre-aggregated
+60-second buckets so dashboard chart requests never scan the full shares table.
 """
 import contextlib
 import mimetypes
 import sqlite3
-import threading
 import time
 from http.server import ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
@@ -20,8 +19,6 @@ from yerbpool.admin_settings import get_pool_fee_percent
 COIN = 100_000_000
 ACTIVE_WINDOW = 600
 HASHRATE_WINDOW = 120
-_POOL_HISTORY_CACHE = {}
-_POOL_HISTORY_CACHE_LOCK = threading.Lock()
 
 
 @contextlib.contextmanager
@@ -65,21 +62,37 @@ def _wallet_balance_atomic():
     return None
 
 
-def _network_hashrate():
-    """Return Yerbas Core's authoritative network hashrate estimate."""
+def _mining_snapshot():
+    """Fetch difficulty and network hashrate with one Core RPC when possible."""
     try:
         info = base.rpc_call("getmininginfo")
-        if isinstance(info, dict) and info.get("networkhashps") is not None:
-            return float(info["networkhashps"])
+        if isinstance(info, dict):
+            difficulty = info.get("difficulty")
+            network_hashrate = info.get("networkhashps")
+            return {
+                "network_difficulty": float(difficulty) if difficulty is not None else None,
+                "network_hashrate": float(network_hashrate) if network_hashrate is not None else None,
+            }
     except Exception:
         pass
+
     try:
-        value = base.rpc_call("getnetworkhashps")
-        if value is not None:
-            return float(value)
+        difficulty = base.current_network_difficulty()
     except Exception:
-        pass
-    return None
+        difficulty = None
+    try:
+        network_hashrate = base.rpc_call("getnetworkhashps")
+        network_hashrate = float(network_hashrate) if network_hashrate is not None else None
+    except Exception:
+        network_hashrate = None
+    return {
+        "network_difficulty": difficulty,
+        "network_hashrate": network_hashrate,
+    }
+
+
+def _network_hashrate():
+    return _mining_snapshot().get("network_hashrate")
 
 
 def api_summary():
@@ -221,32 +234,47 @@ def api_account(address):
 
 
 def api_pool_history(hours=24, bucket_seconds=300):
-    """Pool-wide historical share/hashrate buckets for graphing."""
+    """Pool-wide history from the compact 60-second aggregate table."""
     hours = min(max(int(hours), 1), 168)
     bucket_seconds = min(max(int(bucket_seconds), 60), 3600)
+    # All supported chart bucket sizes are minute multiples.
+    bucket_seconds = max(60, (bucket_seconds // 60) * 60)
     now = int(time.time())
     end = (now // bucket_seconds) * bucket_seconds
     start = end - hours * 3600
-    cache_key = (hours, bucket_seconds, end)
-
-    with _POOL_HISTORY_CACHE_LOCK:
-        cached = _POOL_HISTORY_CACHE.get(cache_key)
-    if cached is not None:
-        return cached
 
     with base.db() as con:
-        raw = base.rows(
-            con,
-            """SELECT (ts / ?) * ? bucket,
-                      COALESCE(SUM(CASE WHEN accepted=1 THEN difficulty ELSE 0 END),0) accepted_diff,
-                      COALESCE(SUM(CASE WHEN accepted=1 THEN 1 ELSE 0 END),0) accepted,
-                      COALESCE(SUM(CASE WHEN accepted=0 THEN 1 ELSE 0 END),0) rejected
-               FROM shares
-               WHERE ts>=? AND ts<?
-               GROUP BY bucket
-               ORDER BY bucket""",
-            (bucket_seconds, bucket_seconds, start, end + bucket_seconds),
-        )
+        has_buckets = con.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='share_buckets_60s'"
+        ).fetchone()
+        if has_buckets:
+            raw = base.rows(
+                con,
+                """SELECT (bucket / ?) * ? bucket,
+                          COALESCE(SUM(accepted_diff),0) accepted_diff,
+                          COALESCE(SUM(accepted),0) accepted,
+                          COALESCE(SUM(rejected),0) rejected
+                   FROM share_buckets_60s
+                   WHERE bucket>=? AND bucket<?
+                   GROUP BY (bucket / ?) * ?
+                   ORDER BY bucket""",
+                (bucket_seconds, bucket_seconds, start, end + bucket_seconds, bucket_seconds, bucket_seconds),
+            )
+        else:
+            # Migration-safe fallback for the brief interval before PoolDB has
+            # created/backfilled the aggregate table.
+            raw = base.rows(
+                con,
+                """SELECT (ts / ?) * ? bucket,
+                          COALESCE(SUM(CASE WHEN accepted=1 THEN difficulty ELSE 0 END),0) accepted_diff,
+                          COALESCE(SUM(CASE WHEN accepted=1 THEN 1 ELSE 0 END),0) accepted,
+                          COALESCE(SUM(CASE WHEN accepted=0 THEN 1 ELSE 0 END),0) rejected
+                   FROM shares
+                   WHERE ts>=? AND ts<?
+                   GROUP BY (ts / ?) * ?
+                   ORDER BY bucket""",
+                (bucket_seconds, bucket_seconds, start, end + bucket_seconds, bucket_seconds, bucket_seconds),
+            )
 
     by_bucket = {int(r["bucket"]): r for r in raw}
     history = []
@@ -263,12 +291,6 @@ def api_pool_history(hours=24, bucket_seconds=300):
             }
         )
         t += bucket_seconds
-
-    with _POOL_HISTORY_CACHE_LOCK:
-        _POOL_HISTORY_CACHE[cache_key] = history
-        if len(_POOL_HISTORY_CACHE) > 24:
-            oldest = next(iter(_POOL_HISTORY_CACHE))
-            _POOL_HISTORY_CACHE.pop(oldest, None)
     return history
 
 
@@ -282,6 +304,20 @@ def _recent_pool_hashrate():
             (cutoff,),
         )
     return _hashrate_from_diff(recent.get("accepted_diff"))
+
+
+def api_hashrate_chart(hours=24, bucket_seconds=600):
+    """Everything the dashboard chart needs in one fast response."""
+    history = api_pool_history(hours, bucket_seconds)
+    mining = _mining_snapshot()
+    return {
+        "history": history,
+        "pool_hashrate": _recent_pool_hashrate(),
+        "hashrate_window_seconds": HASHRATE_WINDOW,
+        "network_difficulty": mining.get("network_difficulty"),
+        "network_hashrate": mining.get("network_hashrate"),
+        "generated_at": int(time.time()),
+    }
 
 
 def api_luck():
@@ -306,11 +342,9 @@ def api_luck():
             (round_start,),
         )
 
-    try:
-        network_diff = base.current_network_difficulty()
-    except Exception:
-        network_diff = None
-    network_hashrate = _network_hashrate()
+    mining = _mining_snapshot()
+    network_diff = mining.get("network_difficulty")
+    network_hashrate = mining.get("network_hashrate")
 
     round_diff = float(round_stats.get("accepted_diff") or 0)
     effort_ratio = 0.0
@@ -389,8 +423,18 @@ class LiveHandler(base.Handler):
 
     def do_GET(self):
         parsed = urlparse(self.path)
+        query = parse_qs(parsed.query)
+        if parsed.path == "/api/hashrate/chart":
+            try:
+                return self.send_json(
+                    api_hashrate_chart(
+                        (query.get("hours") or [24])[0],
+                        (query.get("bucket") or [600])[0],
+                    )
+                )
+            except Exception as exc:
+                return self.send_json({"error": str(exc)}, 500)
         if parsed.path == "/api/pool/history":
-            query = parse_qs(parsed.query)
             try:
                 history = api_pool_history(
                     (query.get("hours") or [24])[0],
