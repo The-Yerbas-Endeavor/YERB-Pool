@@ -12,6 +12,7 @@
   let selected='24H';
   let request=null;
   let rendering=false;
+  let started=false;
 
   function ensureStyles(){
     if(document.getElementById('hashrate-fast-styles')) return;
@@ -92,21 +93,41 @@
     }finally{rendering=false;}
   }
 
-  function start(){
-    ensureStyles();
-    request=fetchData();
-    let tries=0;
-    const timer=setInterval(()=>{
-      tries++;
-      if(card()){clearInterval(timer);render();}
-      else if(tries>200)clearInterval(timer);
-    },25);
-    if(card()){clearInterval(timer);render();}
-    setInterval(()=>{request=fetchData();render();},15000);
+  function tryStart(){
+    if(started)return true;
+    if(!card())return false;
+    started=true;
+    render();
+    return true;
   }
 
-  // Do not wait for DOMContentLoaded. The script is emitted at the end of
-  // <body>, and waiting for DOMContentLoaded delayed chart startup while
-  // unrelated page resources were still loading.
+  function start(){
+    ensureStyles();
+    // Fetch chart data immediately. The dashboard's main renderer can take
+    // several seconds before it inserts the chart card; keep watching until
+    // the card actually exists instead of giving up and waiting for the
+    // 15-second refresh timer.
+    request=fetchData();
+    if(tryStart())return;
+
+    const app=document.querySelector('main#app');
+    if(app){
+      const observer=new MutationObserver(()=>{
+        if(tryStart())observer.disconnect();
+      });
+      observer.observe(app,{childList:true,subtree:true});
+    }
+
+    // Safety fallback for browsers/environments where MutationObserver misses
+    // a wholesale innerHTML replacement. This never expires before startup.
+    const timer=setInterval(()=>{
+      if(tryStart())clearInterval(timer);
+    },100);
+  }
+
   start();
+  setInterval(()=>{
+    request=fetchData();
+    if(started)render();
+  },15000);
 })();
