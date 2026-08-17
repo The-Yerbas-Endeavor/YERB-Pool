@@ -1,4 +1,5 @@
 (function(){
+  'use strict';
   if(location.pathname!=='/') return;
 
   const RANGES={
@@ -8,11 +9,14 @@
     '24H':{hours:24,bucket:600},
     '7D':{hours:168,bucket:3600}
   };
-  const STORAGE_KEY='yerbNetworkHashSamplesV3';
+  const STORAGE_KEY='yerbNetworkHashSamplesV4';
   let selected='24H';
-  let request=null;
+  let preload=window.__YERB_HASHRATE_PRELOAD__ || null;
   let rendering=false;
-  let started=false;
+  let initialized=false;
+
+  const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const hashRate=v=>{v=Number(v||0);if(v>=1e9)return(v/1e9).toFixed(2)+' GH/s';if(v>=1e6)return(v/1e6).toFixed(2)+' MH/s';if(v>=1e3)return(v/1e3).toFixed(2)+' kH/s';return v.toFixed(1)+' H/s';};
 
   function ensureStyles(){
     if(document.getElementById('hashrate-fast-styles')) return;
@@ -21,9 +25,9 @@
     s.textContent=`
       .combined-hash-grid{grid-template-columns:1fr!important}.combined-hash-card{width:100%}
       .hash-head{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap}
-      .hash-range{display:flex;gap:7px;flex-wrap:wrap}.hash-range button{background:#24242c;color:#eee;border:1px solid #666b78;border-radius:7px;padding:6px 11px;font-size:11px;font-weight:700;cursor:pointer}.hash-range button.active{background:rgba(101,196,102,.15);border-color:var(--yerb,#65c466);color:#e2ffe4}
+      .hash-range{display:flex;gap:7px;flex-wrap:wrap}.hash-range button{background:#24242c;color:#eee;border:1px solid #666b78;border-radius:7px;padding:6px 11px;font-size:11px;font-weight:700;cursor:pointer}.hash-range button.active{background:rgba(101,196,102,.15);border-color:#65c466;color:#e2ffe4}
       .hash-metrics{display:grid;grid-template-columns:repeat(5,minmax(130px,1fr));gap:10px;margin:14px 0}.hash-metric{border:1px solid #2d4332;border-radius:9px;padding:11px 13px;background:#141816}.hash-metric span{display:block;color:#9caf9d;font-size:11px}.hash-metric strong{display:block;color:#e9f7ea;font-size:19px;margin-top:3px}.hash-metric small{display:block;color:#829184;font-size:10px;margin-top:3px}
-      .combined-chart-wrap{position:relative;margin-top:8px}.combined-hash-chart{width:100%;height:340px;display:block;cursor:crosshair;overflow:visible}.combined-hash-chart .gridline{stroke:#2d2d2d;stroke-width:1}.combined-hash-chart .pool-line{fill:none;stroke:var(--yerb,#65c466);stroke-width:2.6;vector-effect:non-scaling-stroke}.combined-hash-chart .network-line{fill:none;stroke:#45a3ff;stroke-width:2.4;vector-effect:non-scaling-stroke}.combined-hash-chart .pool-area{fill:rgba(101,196,102,.11)}.combined-hash-chart .network-area{fill:rgba(69,163,255,.07)}.combined-hash-chart .axis{font-size:10px;fill:#8ea091}.combined-hash-chart .pool-axis{fill:#80d985}.combined-hash-chart .net-axis{fill:#6eb7ff}.hash-crosshair{stroke:#8b968d;stroke-width:1;stroke-dasharray:4 4;opacity:0;vector-effect:non-scaling-stroke}
+      .combined-chart-wrap{position:relative;margin-top:8px}.combined-hash-chart{width:100%;height:340px;display:block;cursor:crosshair;overflow:visible}.combined-hash-chart .gridline{stroke:#2d2d2d;stroke-width:1}.combined-hash-chart .pool-line{fill:none;stroke:#65c466;stroke-width:2.6;vector-effect:non-scaling-stroke}.combined-hash-chart .network-line{fill:none;stroke:#45a3ff;stroke-width:2.4;vector-effect:non-scaling-stroke}.combined-hash-chart .pool-area{fill:rgba(101,196,102,.11)}.combined-hash-chart .network-area{fill:rgba(69,163,255,.07)}.combined-hash-chart .axis{font-size:10px;fill:#8ea091}.combined-hash-chart .pool-axis{fill:#80d985}.combined-hash-chart .net-axis{fill:#6eb7ff}.hash-crosshair{stroke:#8b968d;stroke-width:1;stroke-dasharray:4 4;opacity:0;vector-effect:non-scaling-stroke}
       .combined-hash-tooltip{position:absolute;z-index:9;pointer-events:none;min-width:180px;padding:9px 11px;border:1px solid #35503b;border-radius:8px;background:rgba(9,14,11,.97);font-size:11px;line-height:1.55;color:#e6efe7;transform:translate(-50%,-112%)}
       .hash-legend{display:flex;justify-content:center;gap:22px;flex-wrap:wrap;margin-top:9px;font-size:12px}.hash-dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px}.hash-dot.pool{background:#65c466}.hash-dot.net{background:#45a3ff}.hash-footer{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-top:8px;color:#718477;font-size:10px}.hash-loading{min-height:340px;display:flex;align-items:center;justify-content:center;color:#819284;font-size:13px}
       @media(max-width:900px){.hash-metrics{grid-template-columns:repeat(2,minmax(130px,1fr))}}@media(max-width:560px){.hash-metrics{grid-template-columns:1fr}.combined-hash-chart{height:300px}}
@@ -31,7 +35,7 @@
     document.head.appendChild(s);
   }
 
-  function card(){
+  function findCard(){
     const cards=[...document.querySelectorAll('main#app .chart-card')];
     let c=cards.find(x=>['Pool Hashrate','Network Hash vs Pool Hash'].includes(x.querySelector('h3')?.textContent.trim()));
     const other=cards.find(x=>['Share Activity','Network vs Pool Hashrate'].includes(x.querySelector('h3')?.textContent.trim()));
@@ -44,12 +48,20 @@
     return c;
   }
 
-  function fetchData(){
-    const r=RANGES[selected];
-    return get(`/api/hashrate/chart?hours=${r.hours}&bucket=${r.bucket}&_=${Date.now()}`).catch(()=>null);
+  async function fetchData(range){
+    const r=RANGES[range];
+    if(range==='24H' && preload){
+      const p=preload;
+      preload=null;
+      try{return await p;}catch(_){return null;}
+    }
+    try{
+      const res=await fetch(`/api/hashrate/chart?hours=${r.hours}&bucket=${r.bucket}`,{cache:'no-store',credentials:'same-origin'});
+      return res.ok?await res.json():null;
+    }catch(_){return null;}
   }
 
-  function readSamples(){try{return JSON.parse(localStorage.getItem(STORAGE_KEY)||'[]')||[];}catch(_){return[];}}
+  function readSamples(){try{const a=JSON.parse(localStorage.getItem(STORAGE_KEY)||'[]');return Array.isArray(a)?a:[];}catch(_){return[];}}
   function sampleNetwork(v){
     const now=Math.floor(Date.now()/1000);let a=readSamples().filter(x=>Number(x.ts)>now-8*86400);const last=a[a.length-1];
     if(!last||now-Number(last.ts)>=60){a.push({ts:now,hashrate:Number(v||0)});if(a.length>12000)a=a.slice(-12000);try{localStorage.setItem(STORAGE_KEY,JSON.stringify(a));}catch(_){}}
@@ -59,7 +71,7 @@
   function stats(v){v=v.filter(Number.isFinite);return v.length?{avg:v.reduce((a,b)=>a+b,0)/v.length,peak:Math.max(...v)}:{avg:0,peak:0};}
   function label(ts){const d=new Date(ts*1000);return selected==='7D'?d.toLocaleDateString([],{month:'short',day:'numeric'}):d.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});}
 
-  function svg(history,samples,networkNow){
+  function makeSvg(history,samples,networkNow){
     const W=1120,H=340,L=72,R=78,T=22,B=46,iw=W-L-R,ih=H-T-B;
     const rows=history.map(x=>({ts:Number(x.ts||0),pool:Number(x.hashrate||0),network:networkAt(samples,Number(x.ts||0),networkNow)}));
     const pmax=Math.max(...rows.map(x=>x.pool),1)*1.12,nmax=Math.max(...rows.map(x=>x.network),networkNow,1)*1.12;
@@ -73,7 +85,7 @@
   }
 
   function bind(c,history,samples,networkNow){
-    c.querySelectorAll('[data-range]').forEach(b=>b.onclick=()=>{if(!RANGES[b.dataset.range]||b.dataset.range===selected)return;selected=b.dataset.range;request=fetchData();render();});
+    c.querySelectorAll('[data-range]').forEach(b=>b.onclick=()=>{if(!RANGES[b.dataset.range]||b.dataset.range===selected)return;selected=b.dataset.range;render();});
     const el=c.querySelector('.combined-hash-chart'),tip=c.querySelector('.combined-hash-tooltip'),cross=c.querySelector('.hash-crosshair');if(!el||!tip||!cross||!history.length)return;
     const W=1120,L=72,R=78,min=Number(history[0].ts||0),max=Number(history[history.length-1].ts||min+1);
     el.onmousemove=e=>{const r=el.getBoundingClientRect(),sx=Math.max(L,Math.min(W-R,(e.clientX-r.left)/r.width*W)),target=min+(max-min)*(sx-L)/(W-L-R);let best=history[0];for(const x of history)if(Math.abs(Number(x.ts)-target)<Math.abs(Number(best.ts)-target))best=x;const pool=Number(best.hashrate||0),net=networkAt(samples,Number(best.ts),networkNow),share=net>0?pool/net*100:0,x=L+(Number(best.ts)-min)/Math.max(1,max-min)*(W-L-R);cross.setAttribute('x1',x);cross.setAttribute('x2',x);cross.style.opacity='1';tip.hidden=false;tip.innerHTML=`<strong>${esc(new Date(Number(best.ts)*1000).toLocaleString())}</strong><br><span style="color:#80d985">Pool</span>: ${esc(hashRate(pool))}<br><span style="color:#6eb7ff">Network</span>: ${esc(hashRate(net))}<br>Pool share: ${share.toFixed(2)}%`;tip.style.left=`${x/W*100}%`;tip.style.top='58%';};
@@ -81,53 +93,36 @@
   }
 
   async function render(){
-    if(rendering)return;const c=card();if(!c)return;rendering=true;
-    if(!c.dataset.hashFastClaimed){c.dataset.hashFastClaimed='1';c.innerHTML='<div class="hash-head"><div><h3>Network Hash vs Pool Hash</h3><div class="muted small">Pool and Yerbas network hashrate over the selected time range.</div></div></div><div class="hash-loading">Loading hashrate history…</div>';}
+    if(rendering)return;
+    const c=findCard();
+    if(!c)return;
+    rendering=true;
+    c.dataset.hashFastClaimed='1';
+    c.innerHTML=`<div class="hash-head"><div><h3>Network Hash vs Pool Hash</h3><div class="muted small">Pool and Yerbas network hashrate over the selected time range.</div></div><div class="hash-range">${Object.keys(RANGES).map(k=>`<button type="button" disabled class="${k===selected?'active':''}">${k}</button>`).join('')}</div></div><div class="hash-loading">Loading hashrate history…</div>`;
     try{
-      const data=await(request||fetchData());request=null;const history=Array.isArray(data?.history)?data.history:[];
+      const data=await fetchData(selected);
+      const history=Array.isArray(data?.history)?data.history:[];
       if(!data||!history.length){c.innerHTML='<h3>Network Hash vs Pool Hash</h3><div class="hash-loading">Waiting for hashrate data…</div>';return;}
       const networkNow=Number(data.network_hashrate||0),poolNow=Number(data.pool_hashrate||0),samples=sampleNetwork(networkNow),r=RANGES[selected],cut=Math.floor(Date.now()/1000)-r.hours*3600,rangeSamples=samples.filter(x=>Number(x.ts)>=cut);
       const ps=stats(history.map(x=>Number(x.hashrate||0))),ns=stats(history.map(x=>networkAt(rangeSamples,Number(x.ts||0),networkNow))),share=networkNow>0?poolNow/networkNow*100:0;
-      c.innerHTML=`<div class="hash-head"><div><h3>Network Hash vs Pool Hash</h3><div class="muted small">Pool and Yerbas network hashrate over the selected time range.</div></div><div class="hash-range">${Object.keys(RANGES).map(k=>`<button type="button" data-range="${k}" class="${k===selected?'active':''}">${k}</button>`).join('')}</div></div><div class="hash-metrics"><div class="hash-metric"><span>Pool now</span><strong>${hashRate(poolNow)}</strong><small>${selected} average ${hashRate(ps.avg)}</small></div><div class="hash-metric"><span>Network now</span><strong>${hashRate(networkNow)}</strong><small>${selected} average ${hashRate(ns.avg)}</small></div><div class="hash-metric"><span>Pool share</span><strong>${share.toFixed(2)}%</strong><small>of current network hash</small></div><div class="hash-metric"><span>Peak pool</span><strong>${hashRate(ps.peak)}</strong><small>${selected} peak</small></div><div class="hash-metric"><span>Peak network</span><strong>${hashRate(ns.peak)}</strong><small>${selected} peak</small></div></div>${svg(history,rangeSamples,networkNow)}<div class="hash-legend"><span><i class="hash-dot pool"></i>Pool hashrate</span><span><i class="hash-dot net"></i>Network hashrate</span></div><div class="hash-footer"><span>Left scale: pool hashrate · Right scale: network hashrate</span><span>Updated ${new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'})}</span></div>`;
+      c.innerHTML=`<div class="hash-head"><div><h3>Network Hash vs Pool Hash</h3><div class="muted small">Pool and Yerbas network hashrate over the selected time range.</div></div><div class="hash-range">${Object.keys(RANGES).map(k=>`<button type="button" data-range="${k}" class="${k===selected?'active':''}">${k}</button>`).join('')}</div></div><div class="hash-metrics"><div class="hash-metric"><span>Pool now</span><strong>${hashRate(poolNow)}</strong><small>${selected} average ${hashRate(ps.avg)}</small></div><div class="hash-metric"><span>Network now</span><strong>${hashRate(networkNow)}</strong><small>${selected} average ${hashRate(ns.avg)}</small></div><div class="hash-metric"><span>Pool share</span><strong>${share.toFixed(2)}%</strong><small>of current network hash</small></div><div class="hash-metric"><span>Peak pool</span><strong>${hashRate(ps.peak)}</strong><small>${selected} peak</small></div><div class="hash-metric"><span>Peak network</span><strong>${hashRate(ns.peak)}</strong><small>${selected} peak</small></div></div>${makeSvg(history,rangeSamples,networkNow)}<div class="hash-legend"><span><i class="hash-dot pool"></i>Pool hashrate</span><span><i class="hash-dot net"></i>Network hashrate</span></div><div class="hash-footer"><span>Left scale: pool hashrate · Right scale: network hashrate</span><span>Updated ${new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'})}</span></div>`;
       bind(c,history,rangeSamples,networkNow);
+      initialized=true;
     }finally{rendering=false;}
-  }
-
-  function tryStart(){
-    if(started)return true;
-    if(!card())return false;
-    started=true;
-    render();
-    return true;
   }
 
   function start(){
     ensureStyles();
-    // Fetch chart data immediately. The dashboard's main renderer can take
-    // several seconds before it inserts the chart card; keep watching until
-    // the card actually exists instead of giving up and waiting for the
-    // 15-second refresh timer.
-    request=fetchData();
-    if(tryStart())return;
-
     const app=document.querySelector('main#app');
+    const tryRender=()=>{if(findCard()){render();return true;}return false;};
+    if(tryRender()) return;
     if(app){
-      const observer=new MutationObserver(()=>{
-        if(tryStart())observer.disconnect();
-      });
+      const observer=new MutationObserver(()=>{if(tryRender()&&initialized)observer.disconnect();});
       observer.observe(app,{childList:true,subtree:true});
     }
-
-    // Safety fallback for browsers/environments where MutationObserver misses
-    // a wholesale innerHTML replacement. This never expires before startup.
-    const timer=setInterval(()=>{
-      if(tryStart())clearInterval(timer);
-    },100);
+    const fallback=setInterval(()=>{if(tryRender()&&initialized)clearInterval(fallback);},50);
   }
 
   start();
-  setInterval(()=>{
-    request=fetchData();
-    if(started)render();
-  },15000);
+  setInterval(()=>{if(initialized)render();},15000);
 })();
