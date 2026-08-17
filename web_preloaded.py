@@ -81,7 +81,7 @@ if(location.pathname==='/'){
     cache:'no-store',credentials:'same-origin'
   }).then(function(r){return r.ok?r.json():null}).catch(function(){return null});
 }
-</script><script src="/hashrate_chart_fast.js?v=3"></script>'''
+</script><script src="/hashrate_chart_fast.js?v=4"></script>'''
         text = text.replace(
             "</head>",
             '<link rel="stylesheet" href="/brand.css?v=1">' + preload + "</head>",
