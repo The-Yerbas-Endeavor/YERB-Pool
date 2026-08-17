@@ -40,6 +40,24 @@ class PreloadedControlHandler(controls.ControlHandler):
             "latest=Number(x.hashrate||x.combined_hashrate||0)",
         )
 
+        # Keep the dashboard summary cards visually grouped with the combined
+        # Network Hash vs Pool Hash chart instead of floating above it.  This is
+        # a server-side template transform, so the cards are in their final
+        # position on first paint and never jump there later in JavaScript.
+        metric_strip = (
+            '<div class="metric-strip">'
+            '<div class="metric"><span class="muted small">Current pool hashrate</span><strong>${hashRate(poolNow)}</strong></div>'
+            '<div class="metric"><span class="muted small">24h peak hashrate</span><strong>${hashRate(peak)}</strong></div>'
+            '<a class="metric" href="/miners" style="display:block;color:inherit;text-decoration:none"><span class="muted small">Pool Balance / Immature / Total Paid</span><strong>${coin(s.accounts.balance_atomic)} / ${coin(s.accounts.immature_atomic)} / ${coin(s.payouts.paid_atomic)} YERB</strong></a>'
+            '<a class="metric" href="/miners" style="display:block;color:inherit;text-decoration:none"><span class="muted small">Miners / Active</span><strong>${s.accounts.accounts} / ${s.workers.active_workers}</strong></a>'
+            '${luck?`<div class="metric"><span class="muted small">Network difficulty</span><strong>${Number(luck.network_difficulty||0).toPrecision(5)}</strong></div><div class="metric"><span class="muted small">Estimated block time</span><strong>${fmtTime(luck.eta_seconds)}</strong></div>`:\'\'}'
+            '</div>'
+        )
+        chart_open = '<div class="chart-card" id="combined-hash-card">'
+        if metric_strip in text and chart_open in text:
+            text = text.replace(metric_strip, '', 1)
+            text = text.replace(chart_open, chart_open + metric_strip, 1)
+
         # The native dashboard owns its combined chart. Never allow a recurring
         # full-dashboard redraw to destroy/recreate it.
         text = text.replace("if(location.pathname==='/')setInterval(dashboard,10000);", "")
