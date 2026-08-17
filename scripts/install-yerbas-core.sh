@@ -72,8 +72,8 @@ for asset in assets:
     if name.startswith(needle) and name.endswith(".tar.gz"):
         print(asset["browser_download_url"])
         raise SystemExit(0)
-# Prefer the newest Ubuntu x86/arm64 release artifact if this exact Ubuntu
-# version has no prebuilt package. This is deliberately a fallback only.
+# Fallback to another Ubuntu binary of the same architecture only when the
+# release does not publish an exact OS-version artifact.
 candidates=[]
 for asset in assets:
     name=asset.get("name","")
@@ -134,7 +134,9 @@ EOF
 }
 
 ensure_service() {
+    local created=false
     if [[ ! -f "$CORE_SERVICE" ]]; then
+        created=true
         echo "Installing yerbasd.service..."
         $SUDO tee "$CORE_SERVICE" >/dev/null <<'EOF'
 [Unit]
@@ -160,7 +162,12 @@ EOF
     fi
     $SUDO systemctl daemon-reload
     $SUDO systemctl enable yerbasd
-    $SUDO systemctl restart yerbasd
+    if ! $SUDO systemctl is-active --quiet yerbasd; then
+        echo "Starting Yerbas Core..."
+        $SUDO systemctl start yerbasd
+    elif [[ "$created" == false ]]; then
+        echo "Yerbas Core is already running; leaving it undisturbed."
+    fi
 }
 
 read_conf_value() {
@@ -169,7 +176,7 @@ read_conf_value() {
 }
 
 wait_for_rpc() {
-    echo "Waiting for Yerbas Core RPC..."
+    echo "Checking Yerbas Core RPC..."
     local i
     for i in $(seq 1 60); do
         if run_as_core "$CLI_BIN" -datadir="$CORE_DATADIR" getblockchaininfo >/dev/null 2>&1; then
