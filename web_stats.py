@@ -408,6 +408,13 @@ class LiveHandler(base.Handler):
                 '<a class="metric" href="/blocks" style="display:block;color:inherit;text-decoration:none"><span class="muted small">Blocks / Pending</span><strong>${s.blocks.blocks} / ${s.blocks.pending}</strong></a>',
             )
 
+            # The dashboard must physically render one chart card only. The
+            # enhanced chart script owns this card and draws pool + network
+            # hashrate together; Share Activity is not emitted on the dashboard.
+            old_dashboard_charts = '<div class="chart-grid" style="margin-top:16px"><div class="chart-card"><h3>Pool Hashrate</h3><div class="muted small">24-hour estimated hashrate in 5-minute buckets.</div>${h.length?lineChart(h,\'hashrate\',hashRate):\'<div class="empty">Waiting for enough accepted-share history.</div>\'}<div class="legend"><span><i class="dot hashdot"></i>Pool hashrate</span></div></div><div class="chart-card"><h3>Share Activity</h3><div class="muted small">Accepted and rejected shares in 5-minute buckets.</div>${h.length?shareChart(h):\'<div class="empty">Waiting for share history.</div>\'}<div class="legend"><span><i class="dot okdot"></i>Accepted</span><span><i class="dot baddot"></i>Rejected</span></div></div></div>'
+            new_dashboard_chart = '<div class="chart-grid" style="margin-top:16px;grid-template-columns:1fr"><div class="chart-card"><h3>Pool Hashrate</h3><div class="muted small">Loading pool and network hashrate…</div><div class="empty" style="margin-top:12px">Loading chart…</div></div></div>'
+            text = text.replace(old_dashboard_charts, new_dashboard_chart)
+
             # Worker/account detail pages must use canonical API values rather
             # than averaging the latest graph buckets.
             old_latest = "latest=h.slice(-2).reduce((s,v)=>s+Number(v.hashrate||0),0)/Math.max(1,Math.min(2,h.length))"
