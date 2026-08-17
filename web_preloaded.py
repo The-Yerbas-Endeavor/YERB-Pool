@@ -40,6 +40,64 @@ class PreloadedControlHandler(controls.ControlHandler):
             "latest=Number(x.hashrate||x.combined_hashrate||0)",
         )
 
+        # Give the native combined chart access to the non-hash dashboard
+        # values that belong in its metric row.  The context survives range
+        # changes because only the chart data is re-fetched when a range button
+        # is clicked.
+        text = text.replace(
+            "let selectedHashRange='24H';",
+            "let selectedHashRange='24H';\n"
+            "let dashboardHashContext={poolBalanceAtomic:0,miners:0,etaSeconds:null};",
+            1,
+        )
+        text = text.replace(
+            "const current=w.reduce((n,x)=>n+Number(x.active?x.hashrate:0),0),poolNow=Number(hash?.pool_hashrate||luck?.pool_hashrate||current);const cards=",
+            "const current=w.reduce((n,x)=>n+Number(x.active?x.hashrate:0),0),poolNow=Number(hash?.pool_hashrate||luck?.pool_hashrate||current);"
+            "dashboardHashContext={poolBalanceAtomic:Number(s.accounts.balance_atomic||0),miners:Number(s.accounts.accounts||0),etaSeconds:luck?.eta_seconds??null};"
+            "const cards=",
+            1,
+        )
+
+        # Keep six useful metric cards inside Network Hash vs Pool Hash:
+        # Pool now, Network now, Pool share, Pool balance, Miners, and
+        # Estimated block time.  Explicitly remove any legacy Peak pool / Peak
+        # network cards if they are present in the template being served.
+        text = text.replace(
+            ".hash-metrics{display:grid;grid-template-columns:repeat(3,minmax(130px,1fr));",
+            ".hash-metrics{display:grid;grid-template-columns:repeat(6,minmax(130px,1fr));",
+            1,
+        )
+        old_metrics = (
+            '<div class="hash-metrics">'
+            '<div class="hash-metric"><span>Pool now</span><strong>${hashRate(poolNow)}</strong><small>${selectedHashRange} average ${hashRate(ps.avg)}</small></div>'
+            '<div class="hash-metric"><span>Network now</span><strong>${hashRate(networkNow)}</strong><small>${selectedHashRange} average ${hashRate(ns.avg)}</small></div>'
+            '<div class="hash-metric"><span>Pool share</span><strong>${share.toFixed(2)}%</strong><small>of current network hash</small></div>'
+            '</div>'
+        )
+        new_metrics = (
+            '<div class="hash-metrics">'
+            '<div class="hash-metric"><span>Pool now</span><strong>${hashRate(poolNow)}</strong><small>${selectedHashRange} average ${hashRate(ps.avg)}</small></div>'
+            '<div class="hash-metric"><span>Network now</span><strong>${hashRate(networkNow)}</strong><small>${selectedHashRange} average ${hashRate(ns.avg)}</small></div>'
+            '<div class="hash-metric"><span>Pool share</span><strong>${share.toFixed(2)}%</strong><small>of current network hash</small></div>'
+            '<div class="hash-metric"><span>Pool balance</span><strong>${coin(dashboardHashContext.poolBalanceAtomic)} YERB</strong><small>available pool wallet balance</small></div>'
+            '<div class="hash-metric"><span>Miners</span><strong>${Number(dashboardHashContext.miners||0).toLocaleString()}</strong><small>tracked payout addresses</small></div>'
+            '<div class="hash-metric"><span>Estimated block time</span><strong>${fmtTime(dashboardHashContext.etaSeconds)}</strong><small>at current pool hashrate</small></div>'
+            '</div>'
+        )
+        text = text.replace(old_metrics, new_metrics, 1)
+        text = re.sub(
+            r'<div class="hash-metric"><span>Peak pool</span>.*?</div>',
+            '<div class="hash-metric"><span>Pool balance</span><strong>${coin(dashboardHashContext.poolBalanceAtomic)} YERB</strong><small>available pool wallet balance</small></div>',
+            text,
+            count=1,
+        )
+        text = re.sub(
+            r'<div class="hash-metric"><span>Peak network</span>.*?</div>',
+            '<div class="hash-metric"><span>Miners</span><strong>${Number(dashboardHashContext.miners||0).toLocaleString()}</strong><small>tracked payout addresses</small></div><div class="hash-metric"><span>Estimated block time</span><strong>${fmtTime(dashboardHashContext.etaSeconds)}</strong><small>at current pool hashrate</small></div>',
+            text,
+            count=1,
+        )
+
         # The native dashboard owns its combined chart and the old dashboard
         # metric strip has been removed from web/index.html. Never allow a
         # recurring full-dashboard redraw to destroy/recreate the chart.
