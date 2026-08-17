@@ -3,7 +3,7 @@
 
   const BLOCK_TARGET_SECONDS=150;
   const DIFF1_HASHES=4294967296;
-  const STORAGE_KEY='yerbNetworkHashSamplesV1';
+  const STORAGE_KEY='yerbNetworkHashSamplesV2';
   const RANGES={
     '1H':{hours:1,bucket:60},
     '6H':{hours:6,bucket:300},
@@ -11,263 +11,260 @@
     '24H':{hours:24,bucket:600},
     '7D':{hours:168,bucket:3600}
   };
+
   let selectedRange='24H';
   let busy=false;
-  let rerenderRequested=false;
-  let renderQueued=false;
+  let pending=false;
 
-  function allChartCards(){
+  function cards(){
     return [...document.querySelectorAll('main#app .chart-card')];
   }
 
-  function poolCard(){
-    return allChartCards().find(card=>card.querySelector('h3')?.textContent.trim()==='Pool Hashrate')||null;
+  function findCard(title){
+    return cards().find(c=>c.querySelector('h3')?.textContent.trim()===title)||null;
   }
 
-  function networkCard(){
-    return allChartCards().find(card=>{
-      const title=card.querySelector('h3')?.textContent.trim();
-      return title==='Share Activity'||title==='Network vs Pool Hashrate';
-    })||null;
-  }
+  function combinedCard(){
+    let pool=findCard('Pool Hashrate');
+    let other=findCard('Network vs Pool Hashrate')||findCard('Share Activity');
+    if(!pool && other) pool=other;
+    if(!pool) return null;
 
-  function claimCards(){
-    const network=networkCard();
-    if(network && network.querySelector('h3')?.textContent.trim()==='Share Activity'){
-      network.innerHTML='<h3>Network vs Pool Hashrate</h3><div class="muted small">Loading hashrate data…</div><div class="empty" style="margin-top:12px">Loading chart…</div>';
+    const grid=pool.closest('.chart-grid');
+    if(grid){
+      grid.style.gridTemplateColumns='1fr';
+      grid.classList.add('combined-hash-grid');
     }
-    return {pool:poolCard(),network};
+    if(other && other!==pool) other.remove();
+    pool.classList.add('combined-hash-card');
+    return pool;
   }
 
-  function readNetworkSamples(){
+  function readSamples(){
     try{
-      const value=JSON.parse(localStorage.getItem(STORAGE_KEY)||'[]');
-      return Array.isArray(value)?value:[];
+      const a=JSON.parse(localStorage.getItem(STORAGE_KEY)||'[]');
+      return Array.isArray(a)?a:[];
     }catch(_){ return []; }
   }
 
-  function recordNetworkSample(hashrate){
+  function saveNetworkSample(hashrate){
     const now=Math.floor(Date.now()/1000);
-    let samples=readNetworkSamples().filter(x=>Number(x.ts)>now-(8*86400));
-    const last=samples[samples.length-1];
+    let a=readSamples().filter(x=>Number(x.ts)>now-8*86400);
+    const last=a[a.length-1];
     if(!last || now-Number(last.ts)>=60){
-      samples.push({ts:now,hashrate:Number(hashrate||0)});
-      if(samples.length>12000) samples=samples.slice(-12000);
-      try{ localStorage.setItem(STORAGE_KEY,JSON.stringify(samples)); }catch(_){ }
+      a.push({ts:now,hashrate:Number(hashrate||0)});
+      if(a.length>12000) a=a.slice(-12000);
+      try{localStorage.setItem(STORAGE_KEY,JSON.stringify(a));}catch(_){ }
     }
-    return samples;
+    return a;
   }
 
-  function nearestNetwork(samples,ts,fallback){
+  function networkAt(samples,ts,fallback){
     if(!samples.length) return fallback;
-    let lo=0,hi=samples.length-1;
-    while(lo<hi){
-      const mid=Math.floor((lo+hi+1)/2);
-      if(Number(samples[mid].ts)<=ts) lo=mid; else hi=mid-1;
+    let best=samples[0];
+    for(const s of samples){
+      if(Math.abs(Number(s.ts)-ts)<Math.abs(Number(best.ts)-ts)) best=s;
     }
-    const a=samples[lo];
-    const b=samples[Math.min(lo+1,samples.length-1)];
-    if(!a) return fallback;
-    if(!b) return Number(a.hashrate||fallback);
-    return Math.abs(Number(a.ts)-ts)<=Math.abs(Number(b.ts)-ts)
-      ? Number(a.hashrate||fallback)
-      : Number(b.hashrate||fallback);
+    return Number(best.hashrate||fallback);
   }
 
-  function timeLabel(ts,range){
+  function timeLabel(ts){
     const d=new Date(ts*1000);
-    if(range==='7D') return d.toLocaleDateString([], {month:'short',day:'numeric'});
+    if(selectedRange==='7D') return d.toLocaleDateString([], {month:'short',day:'numeric'});
     return d.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
   }
 
-  function stats(history,key='hashrate'){
-    const vals=history.map(x=>Number(x[key]||0)).filter(Number.isFinite);
-    if(!vals.length) return {avg:0,peak:0};
-    return {avg:vals.reduce((a,b)=>a+b,0)/vals.length,peak:Math.max(...vals)};
+  function calcStats(values){
+    const v=values.filter(Number.isFinite);
+    if(!v.length) return {avg:0,peak:0};
+    return {avg:v.reduce((a,b)=>a+b,0)/v.length,peak:Math.max(...v)};
   }
 
-  function rangeButtons(){
-    return `<div class="hash-range-buttons">${Object.keys(RANGES).map(k=>`<button type="button" data-hash-range="${k}" class="${k===selectedRange?'active':''}">${k}</button>`).join('')}</div>`;
-  }
+  function chart(history,samples,networkNow){
+    const W=1120,H=340,L=72,R=78,T=22,B=46,iw=W-L-R,ih=H-T-B;
+    const rows=history.map(x=>({
+      ts:Number(x.ts||0),
+      pool:Number(x.hashrate||0),
+      network:networkAt(samples,Number(x.ts||0),networkNow)
+    }));
+    const poolMax=Math.max(...rows.map(x=>x.pool),1)*1.12;
+    const networkMax=Math.max(...rows.map(x=>x.network),networkNow,1)*1.12;
+    const minTs=rows[0]?.ts||0;
+    const maxTs=rows[rows.length-1]?.ts||minTs+1;
+    const px=ts=>L+(ts-minTs)/Math.max(1,maxTs-minTs)*iw;
+    const pyPool=v=>T+ih-(Number(v||0)/poolMax)*ih;
+    const pyNet=v=>T+ih-(Number(v||0)/networkMax)*ih;
+    const poolPts=rows.map(r=>`${px(r.ts).toFixed(1)},${pyPool(r.pool).toFixed(1)}`).join(' ');
+    const netPts=rows.map(r=>`${px(r.ts).toFixed(1)},${pyNet(r.network).toFixed(1)}`).join(' ');
+    const poolArea=rows.length?`${L},${T+ih} ${poolPts} ${W-R},${T+ih}`:'';
+    const netArea=rows.length?`${L},${T+ih} ${netPts} ${W-R},${T+ih}`:'';
 
-  function poolSvg(history){
-    const W=760,H=270,L=64,R=18,T=18,B=36,iw=W-L-R,ih=H-T-B;
-    const rows=history.map(x=>({ts:Number(x.ts||0),pool:Number(x.hashrate||0)}));
-    const max=Math.max(...rows.map(x=>x.pool),1)*1.08;
-    const minTs=rows[0]?.ts||0,maxTs=rows[rows.length-1]?.ts||minTs+1;
-    const px=ts=>L+((ts-minTs)/Math.max(1,maxTs-minTs))*iw;
-    const py=v=>T+ih-Number(v||0)/max*ih;
-    const points=rows.map(x=>`${px(x.ts).toFixed(1)},${py(x.pool).toFixed(1)}`).join(' ');
-    const area=rows.length?`${L},${T+ih} ${points} ${W-R},${T+ih}`:'';
     let grid='';
     for(let i=0;i<=4;i++){
-      const y=T+ih*i/4,val=max*(1-i/4);
-      grid+=`<line class="gridline" x1="${L}" y1="${y}" x2="${W-R}" y2="${y}"/><text class="axis-label" x="4" y="${y+4}">${esc(hashRate(val))}</text>`;
+      const y=T+ih*i/4;
+      const pv=poolMax*(1-i/4),nv=networkMax*(1-i/4);
+      grid+=`<line class="gridline" x1="${L}" y1="${y}" x2="${W-R}" y2="${y}"/>`+
+            `<text class="axis pool-axis" x="4" y="${y+4}">${esc(hashRate(pv))}</text>`+
+            `<text class="axis net-axis" text-anchor="end" x="${W-4}" y="${y+4}">${esc(hashRate(nv))}</text>`;
     }
-    let xlabels='';
-    const count=selectedRange==='7D'?7:5;
+
+    let labels='';
+    const count=selectedRange==='7D'?7:6;
     for(let i=0;i<count;i++){
       const ts=minTs+(maxTs-minTs)*(i/Math.max(1,count-1));
-      const x=px(ts),anchor=i===0?'start':(i===count-1?'end':'middle');
-      xlabels+=`<text class="axis-label" text-anchor="${anchor}" x="${x}" y="${H-8}">${esc(timeLabel(ts,selectedRange))}</text>`;
+      const x=px(ts);
+      const anchor=i===0?'start':(i===count-1?'end':'middle');
+      labels+=`<text class="axis time-axis" text-anchor="${anchor}" x="${x}" y="${H-10}">${esc(timeLabel(ts))}</text>`;
     }
-    return `<div class="hash-chart-wrap"><svg class="chart enhanced-pool-chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">${grid}<polygon class="pool-hash-area" points="${area}"/><polyline class="pool-hash-line" points="${points}"/>${xlabels}<line class="chart-crosshair" x1="0" x2="0" y1="${T}" y2="${T+ih}"/></svg><div class="hash-tooltip" hidden></div></div>`;
+
+    return `<div class="combined-chart-wrap">
+      <svg class="chart combined-hash-chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
+        ${grid}
+        <polygon class="network-area" points="${netArea}"/>
+        <polygon class="pool-area" points="${poolArea}"/>
+        <polyline class="network-line" points="${netPts}"/>
+        <polyline class="pool-line" points="${poolPts}"/>
+        ${labels}
+        <line class="hash-crosshair" x1="0" x2="0" y1="${T}" y2="${T+ih}"/>
+      </svg>
+      <div class="combined-hash-tooltip" hidden></div>
+    </div>`;
   }
 
-  function networkSvg(history,networkSamples,networkNow){
-    const W=760,H=270,L=64,R=18,T=18,B=36,iw=W-L-R,ih=H-T-B;
-    const rows=history.map(x=>({ts:Number(x.ts||0),pool:Number(x.hashrate||0),network:nearestNetwork(networkSamples,Number(x.ts||0),networkNow)}));
-    const max=Math.max(...rows.flatMap(x=>[x.pool,x.network]),1)*1.08;
-    const minTs=rows[0]?.ts||0,maxTs=rows[rows.length-1]?.ts||minTs+1;
-    const px=ts=>L+((ts-minTs)/Math.max(1,maxTs-minTs))*iw;
-    const py=v=>T+ih-Number(v||0)/max*ih;
-    const poolPoints=rows.map(x=>`${px(x.ts).toFixed(1)},${py(x.pool).toFixed(1)}`).join(' ');
-    const networkPoints=rows.map(x=>`${px(x.ts).toFixed(1)},${py(x.network).toFixed(1)}`).join(' ');
-    const poolArea=rows.length?`${L},${T+ih} ${poolPoints} ${W-R},${T+ih}`:'';
-    let grid='';
-    for(let i=0;i<=4;i++){
-      const y=T+ih*i/4,val=max*(1-i/4);
-      grid+=`<line class="gridline" x1="${L}" y1="${y}" x2="${W-R}" y2="${y}"/><text class="axis-label" x="4" y="${y+4}">${esc(hashRate(val))}</text>`;
-    }
-    let xlabels='';
-    const count=selectedRange==='7D'?7:5;
-    for(let i=0;i<count;i++){
-      const ts=minTs+(maxTs-minTs)*(i/Math.max(1,count-1));
-      const x=px(ts),anchor=i===0?'start':(i===count-1?'end':'middle');
-      xlabels+=`<text class="axis-label" text-anchor="${anchor}" x="${x}" y="${H-8}">${esc(timeLabel(ts,selectedRange))}</text>`;
-    }
-    return `<div class="hash-chart-wrap"><svg class="chart network-pool-chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">${grid}<polygon class="pool-hash-area" points="${poolArea}"/><polyline class="network-hash-line" points="${networkPoints}"/><polyline class="pool-hash-line" points="${poolPoints}"/>${xlabels}<line class="chart-crosshair" x1="0" x2="0" y1="${T}" y2="${T+ih}"/></svg><div class="hash-tooltip" hidden></div></div>`;
-  }
-
-  function ensureStyles(){
-    if(document.getElementById('network-pool-chart-styles')) return;
-    const style=document.createElement('style');
-    style.id='network-pool-chart-styles';
-    style.textContent=`
-      .hash-chart-head{display:flex;justify-content:space-between;align-items:flex-start;gap:14px;flex-wrap:wrap}
-      .hash-range-buttons{display:flex;gap:5px;flex-wrap:wrap}
-      .hash-range-buttons button{padding:5px 9px;border:1px solid #657;border-radius:7px;background:#25252d;color:#eee;font-size:11px;line-height:1.2;cursor:pointer}
-      .hash-range-buttons button:hover{border-color:#8aa58c}
-      .hash-range-buttons button.active{border-color:var(--yerb,#65c466);color:#dfffe1;background:rgba(101,196,102,.13)}
-      .enhanced-pool-chart,.network-pool-chart{overflow:visible;cursor:crosshair}
-      .enhanced-pool-chart .pool-hash-line,.network-pool-chart .pool-hash-line{fill:none;stroke:var(--yerb,#65c466);stroke-width:2.8;vector-effect:non-scaling-stroke}
-      .enhanced-pool-chart .pool-hash-area,.network-pool-chart .pool-hash-area{fill:rgba(101,196,102,.10)}
-      .network-pool-chart .network-hash-line{fill:none;stroke:#74c0fc;stroke-width:2.3;stroke-dasharray:7 5;vector-effect:non-scaling-stroke}
-      .enhanced-pool-chart .axis-label,.network-pool-chart .axis-label{fill:#8fa491;font-size:10px}
-      .hash-summary{display:flex;gap:20px;flex-wrap:wrap;margin:10px 0 4px;font-size:12px;color:#9caf9d}
-      .hash-summary strong{display:block;color:#e9f7ea;font-size:17px;margin-top:2px}
-      .hash-chart-wrap{position:relative;margin-top:4px}
-      .chart-crosshair{stroke:#718477;stroke-width:1;stroke-dasharray:3 3;opacity:0;pointer-events:none;vector-effect:non-scaling-stroke}
-      .hash-tooltip{position:absolute;pointer-events:none;z-index:6;padding:8px 10px;border:1px solid #334a38;border-radius:8px;background:rgba(10,18,12,.96);box-shadow:0 8px 24px rgba(0,0,0,.3);font-size:11px;line-height:1.5;white-space:nowrap;color:#dbe8dc;transform:translate(-50%,-110%)}
-      .network-pool-legend{display:flex;gap:16px;flex-wrap:wrap;margin-top:8px;font-size:12px}
-      .network-pool-legend .network-dot{background:#74c0fc}
-      .hash-update-note{margin-top:7px;font-size:10px;color:#718477}
+  function styles(){
+    if(document.getElementById('combined-hash-styles')) return;
+    const s=document.createElement('style');
+    s.id='combined-hash-styles';
+    s.textContent=`
+      .combined-hash-grid{grid-template-columns:1fr!important}
+      .combined-hash-card{width:100%}
+      .hash-head{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap}
+      .hash-range{display:flex;gap:7px;flex-wrap:wrap}
+      .hash-range button{background:#24242c;color:#eee;border:1px solid #666b78;border-radius:7px;padding:6px 11px;font-size:11px;font-weight:700;cursor:pointer}
+      .hash-range button:hover{border-color:#85b98a}
+      .hash-range button.active{background:rgba(101,196,102,.15);border-color:var(--yerb,#65c466);color:#e2ffe4}
+      .hash-metrics{display:grid;grid-template-columns:repeat(5,minmax(130px,1fr));gap:10px;margin:14px 0}
+      .hash-metric{border:1px solid #2d4332;border-radius:9px;padding:11px 13px;background:#141816}
+      .hash-metric span{display:block;color:#9caf9d;font-size:11px}
+      .hash-metric strong{display:block;color:#e9f7ea;font-size:19px;margin-top:3px}
+      .hash-metric small{display:block;color:#829184;font-size:10px;margin-top:3px}
+      .combined-chart-wrap{position:relative;margin-top:8px}
+      .combined-hash-chart{height:340px;cursor:crosshair;overflow:visible}
+      .combined-hash-chart .pool-line{fill:none;stroke:var(--yerb,#65c466);stroke-width:2.6;vector-effect:non-scaling-stroke}
+      .combined-hash-chart .network-line{fill:none;stroke:#45a3ff;stroke-width:2.4;vector-effect:non-scaling-stroke}
+      .combined-hash-chart .pool-area{fill:rgba(101,196,102,.11)}
+      .combined-hash-chart .network-area{fill:rgba(69,163,255,.08)}
+      .combined-hash-chart .axis{font-size:10px;fill:#8ea091}
+      .combined-hash-chart .pool-axis{fill:#80d985}
+      .combined-hash-chart .net-axis{fill:#6eb7ff}
+      .hash-crosshair{stroke:#8b968d;stroke-width:1;stroke-dasharray:4 4;opacity:0;vector-effect:non-scaling-stroke}
+      .combined-hash-tooltip{position:absolute;z-index:9;pointer-events:none;min-width:180px;padding:9px 11px;border:1px solid #35503b;border-radius:8px;background:rgba(9,14,11,.97);box-shadow:0 8px 28px rgba(0,0,0,.35);font-size:11px;line-height:1.55;color:#e6efe7;transform:translate(-50%,-112%)}
+      .hash-legend{display:flex;justify-content:center;gap:22px;flex-wrap:wrap;margin-top:9px;font-size:12px}
+      .hash-dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px}.hash-dot.pool{background:#65c466}.hash-dot.net{background:#45a3ff}
+      .hash-footer{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-top:8px;color:#718477;font-size:10px}
+      @media(max-width:900px){.hash-metrics{grid-template-columns:repeat(2,minmax(130px,1fr))}}
+      @media(max-width:560px){.hash-metrics{grid-template-columns:1fr}.combined-hash-chart{height:300px}}
     `;
-    document.head.appendChild(style);
+    document.head.appendChild(s);
   }
 
-  function bindRangeButtons(root){
-    root.querySelectorAll('[data-hash-range]').forEach(btn=>{
-      btn.addEventListener('click',e=>{
-        e.preventDefault();
-        e.stopPropagation();
-        const next=btn.dataset.hashRange;
-        if(!RANGES[next]) return;
+  function bindHover(card,history,samples,networkNow){
+    const svg=card.querySelector('.combined-hash-chart');
+    const tip=card.querySelector('.combined-hash-tooltip');
+    const cross=card.querySelector('.hash-crosshair');
+    if(!svg||!tip||!cross||!history.length) return;
+    const W=1120,L=72,R=78;
+    const minTs=Number(history[0].ts||0),maxTs=Number(history[history.length-1].ts||minTs+1);
+
+    function show(clientX){
+      const rect=svg.getBoundingClientRect();
+      const sx=Math.max(L,Math.min(W-R,(clientX-rect.left)/rect.width*W));
+      const ratio=(sx-L)/(W-L-R);
+      const target=minTs+(maxTs-minTs)*ratio;
+      let best=history[0];
+      for(const r of history){if(Math.abs(Number(r.ts)-target)<Math.abs(Number(best.ts)-target)) best=r;}
+      const pool=Number(best.hashrate||0);
+      const net=networkAt(samples,Number(best.ts),networkNow);
+      const share=net>0?pool/net*100:0;
+      const x=L+(Number(best.ts)-minTs)/Math.max(1,maxTs-minTs)*(W-L-R);
+      cross.setAttribute('x1',x);cross.setAttribute('x2',x);cross.style.opacity='1';
+      tip.hidden=false;
+      tip.innerHTML=`<strong>${esc(new Date(Number(best.ts)*1000).toLocaleString())}</strong><br><span style="color:#80d985">Pool</span>: ${esc(hashRate(pool))}<br><span style="color:#6eb7ff">Network</span>: ${esc(hashRate(net))}<br>Pool share: ${share.toFixed(2)}%`;
+      tip.style.left=`${(x/W)*100}%`;
+      tip.style.top='58%';
+    }
+    svg.addEventListener('mousemove',e=>show(e.clientX));
+    svg.addEventListener('mouseleave',()=>{tip.hidden=true;cross.style.opacity='0';});
+    svg.addEventListener('touchmove',e=>{if(e.touches[0])show(e.touches[0].clientX);},{passive:true});
+  }
+
+  function bindRange(card){
+    card.querySelectorAll('[data-range]').forEach(btn=>{
+      btn.onclick=()=>{
+        const next=btn.dataset.range;
+        if(!RANGES[next]||next===selectedRange) return;
         selectedRange=next;
-        document.querySelectorAll('[data-hash-range]').forEach(b=>b.classList.toggle('active',b.dataset.hashRange===selectedRange));
-        requestRender(true);
-      });
+        render(true);
+      };
     });
   }
 
-  function bindHover(card,history,networkSamples=null,networkNow=0){
-    const svg=card.querySelector('svg.chart');
-    const tooltip=card.querySelector('.hash-tooltip');
-    const crosshair=card.querySelector('.chart-crosshair');
-    if(!svg||!tooltip||!crosshair||!history.length) return;
-    const W=760,L=64,R=18;
-    const minTs=Number(history[0].ts||0),maxTs=Number(history[history.length-1].ts||minTs+1);
-    function showAt(clientX){
-      const rect=svg.getBoundingClientRect();
-      const x=Math.max(L,Math.min(W-R,(clientX-rect.left)/rect.width*W));
-      const ratio=(x-L)/(W-L-R),ts=minTs+(maxTs-minTs)*ratio;
-      let best=history[0];
-      for(const row of history){ if(Math.abs(Number(row.ts)-ts)<Math.abs(Number(best.ts)-ts)) best=row; }
-      const pool=Number(best.hashrate||0);
-      const sx=L+((Number(best.ts)-minTs)/Math.max(1,maxTs-minTs))*(W-L-R);
-      crosshair.setAttribute('x1',sx);crosshair.setAttribute('x2',sx);crosshair.style.opacity='1';
-      let html=`<strong>${esc(new Date(Number(best.ts)*1000).toLocaleString())}</strong><br>Pool: ${esc(hashRate(pool))}`;
-      if(networkSamples){
-        const network=nearestNetwork(networkSamples,Number(best.ts),networkNow);
-        const share=network>0?pool/network*100:0;
-        html+=`<br>Network: ${esc(hashRate(network))}<br>Pool share: ${share.toFixed(2)}%`;
-      }
-      tooltip.hidden=false;tooltip.innerHTML=html;tooltip.style.left=`${(sx/W)*100}%`;tooltip.style.top='50%';
-    }
-    svg.addEventListener('mousemove',e=>showAt(e.clientX));
-    svg.addEventListener('mouseleave',()=>{tooltip.hidden=true;crosshair.style.opacity='0';});
-    svg.addEventListener('touchmove',e=>{if(e.touches[0]) showAt(e.touches[0].clientX);},{passive:true});
-  }
-
-  function requestRender(force=false){
-    if(busy){ rerenderRequested=true; return; }
-    if(force){ render(); return; }
-    if(renderQueued) return;
-    renderQueued=true;
-    requestAnimationFrame(()=>{renderQueued=false;render();});
-  }
-
-  async function render(){
-    const cards=claimCards();
-    if((!cards.pool&&!cards.network)||busy){ if(busy) rerenderRequested=true; return; }
+  async function render(force=false){
+    if(busy){pending=true;return;}
+    const card=combinedCard();
+    if(!card) return;
     busy=true;
     try{
-      const range=RANGES[selectedRange];
+      const r=RANGES[selectedRange];
       const [history,luck]=await Promise.all([
-        get(`/api/pool/history?hours=${range.hours}&bucket=${range.bucket}`).catch(()=>[]),
-        get('/api/luck').catch(()=>null)
+        get(`/api/pool/history?hours=${r.hours}&bucket=${r.bucket}&_=${Date.now()}`).catch(()=>[]),
+        get(`/api/luck?_=${Date.now()}`).catch(()=>null)
       ]);
-      if(!history.length || !luck) return;
+      if(!history.length||!luck) return;
 
       const difficulty=Number(luck.network_difficulty||0);
-      const networkHashrate=difficulty>0?difficulty*DIFF1_HASHES/BLOCK_TARGET_SECONDS:0;
-      const poolHashrate=Number(luck.pool_hashrate||0);
-      const networkSamples=recordNetworkSample(networkHashrate);
-      const cutoff=Math.floor(Date.now()/1000)-range.hours*3600;
-      const visibleNetwork=networkSamples.filter(x=>Number(x.ts)>=cutoff);
-      const poolShare=networkHashrate>0?poolHashrate/networkHashrate*100:0;
-      const ps=stats(history);
-      const nowLabel=new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',second:'2-digit'});
+      const networkNow=difficulty>0?difficulty*DIFF1_HASHES/BLOCK_TARGET_SECONDS:0;
+      const poolNow=Number(luck.pool_hashrate||0);
+      const allSamples=saveNetworkSample(networkNow);
+      const cutoff=Math.floor(Date.now()/1000)-r.hours*3600;
+      const samples=allSamples.filter(x=>Number(x.ts)>=cutoff);
+      const poolVals=history.map(x=>Number(x.hashrate||0));
+      const netVals=history.map(x=>networkAt(samples,Number(x.ts||0),networkNow));
+      const p=calcStats(poolVals),n=calcStats(netVals);
+      const share=networkNow>0?poolNow/networkNow*100:0;
 
-      const current=claimCards();
-      ensureStyles();
-
-      if(current.pool){
-        current.pool.innerHTML=`<div class="hash-chart-head"><div><h3>Pool Hashrate</h3><div class="muted small">Estimated pool hashrate over the selected range.</div></div>${rangeButtons()}</div><div class="hash-summary"><span>Pool now<strong>${hashRate(poolHashrate)}</strong></span><span>${selectedRange} average<strong>${hashRate(ps.avg)}</strong></span><span>${selectedRange} peak<strong>${hashRate(ps.peak)}</strong></span></div>${poolSvg(history)}<div class="network-pool-legend"><span><i class="dot" style="background:var(--yerb,#65c466)"></i>Pool hashrate</span></div><div class="hash-update-note">Updated ${nowLabel}.</div>`;
-        bindRangeButtons(current.pool);
-        bindHover(current.pool,history);
-      }
-
-      if(current.network){
-        current.network.innerHTML=`<div class="hash-chart-head"><div><h3>Network vs Pool Hashrate</h3><div class="muted small">Pool estimate compared with Yerbas network hashrate over the selected range.</div></div>${rangeButtons()}</div><div class="hash-summary"><span>Pool now<strong>${hashRate(poolHashrate)}</strong></span><span>Network now<strong>${hashRate(networkHashrate)}</strong></span><span>Pool share<strong>${poolShare.toFixed(2)}%</strong></span></div>${networkSvg(history,visibleNetwork,networkHashrate)}<div class="network-pool-legend"><span><i class="dot" style="background:var(--yerb,#65c466)"></i>Pool hashrate</span><span><i class="dot network-dot"></i>Network hashrate</span></div><div class="hash-update-note">Network history is sampled while this dashboard is viewed; the line becomes historical as samples accumulate. Updated ${nowLabel}.</div>`;
-        bindRangeButtons(current.network);
-        bindHover(current.network,history,visibleNetwork,networkHashrate);
-      }
+      styles();
+      card.innerHTML=`
+        <div class="hash-head">
+          <div><h3>Network Hash vs Pool Hash</h3><div class="muted small">Pool and Yerbas network hashrate over the selected time range.</div></div>
+          <div class="hash-range">${Object.keys(RANGES).map(k=>`<button type="button" data-range="${k}" class="${k===selectedRange?'active':''}">${k}</button>`).join('')}</div>
+        </div>
+        <div class="hash-metrics">
+          <div class="hash-metric"><span>Pool now</span><strong>${hashRate(poolNow)}</strong><small>${selectedRange} average ${hashRate(p.avg)}</small></div>
+          <div class="hash-metric"><span>Network now</span><strong>${hashRate(networkNow)}</strong><small>${selectedRange} average ${hashRate(n.avg)}</small></div>
+          <div class="hash-metric"><span>Pool share</span><strong>${share.toFixed(2)}%</strong><small>of current network hash</small></div>
+          <div class="hash-metric"><span>Peak pool</span><strong>${hashRate(p.peak)}</strong><small>${selectedRange} peak</small></div>
+          <div class="hash-metric"><span>Peak network</span><strong>${hashRate(n.peak)}</strong><small>${selectedRange} peak</small></div>
+        </div>
+        ${chart(history,samples,networkNow)}
+        <div class="hash-legend"><span><i class="hash-dot pool"></i>Pool hashrate</span><span><i class="hash-dot net"></i>Network hashrate</span></div>
+        <div class="hash-footer"><span>Left scale: pool hashrate · Right scale: network hashrate</span><span>Updated ${new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',second:'2-digit'})}</span></div>`;
+      bindRange(card);
+      bindHover(card,history,samples,networkNow);
     }finally{
       busy=false;
-      if(rerenderRequested){ rerenderRequested=false; requestRender(true); }
+      if(pending){pending=false;setTimeout(()=>render(true),0);}
     }
   }
 
   function install(){
-    ensureStyles();
-    requestRender();
-    const main=document.querySelector('main#app');
-    if(main){
-      const observer=new MutationObserver(()=>requestRender());
-      observer.observe(main,{childList:true,subtree:true});
-    }
-    setInterval(()=>requestRender(),15000);
+    styles();
+    const wait=()=>{
+      if(combinedCard()) render();
+      else setTimeout(wait,100);
+    };
+    wait();
+    setInterval(()=>render(),15000);
   }
 
   if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',install);
