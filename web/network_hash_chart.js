@@ -25,7 +25,7 @@
   }
 
   function combinedCard(){
-    let pool=findCard('Pool Hashrate');
+    let pool=findCard('Pool Hashrate')||findCard('Network Hash vs Pool Hash');
     let other=findCard('Network vs Pool Hashrate')||findCard('Share Activity');
     if(!pool && other) pool=other;
     if(!pool) return null;
@@ -37,6 +37,20 @@
     }
     if(other && other!==pool) other.remove();
     pool.classList.add('combined-hash-card');
+
+    // Claim the legacy Pool Hashrate card immediately.  Previously the
+    // enhancer waited for the API request to finish before replacing it,
+    // which allowed the old Pool Hashrate + Share Activity graphs to flash
+    // on screen for several seconds on a cold page load.
+    if(!pool.dataset.hashCombinedClaimed){
+      pool.dataset.hashCombinedClaimed='1';
+      pool.innerHTML=`
+        <div class="hash-head">
+          <div><h3>Network Hash vs Pool Hash</h3><div class="muted small">Pool and Yerbas network hashrate over the selected time range.</div></div>
+          <div class="hash-range">${Object.keys(RANGES).map(k=>`<button type="button" disabled class="${k===selectedRange?'active':''}">${k}</button>`).join('')}</div>
+        </div>
+        <div class="hash-loading">Loading hashrate history…</div>`;
+    }
     return pool;
   }
 
@@ -141,8 +155,10 @@
       .hash-head{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap}
       .hash-range{display:flex;gap:7px;flex-wrap:wrap}
       .hash-range button{background:#24242c;color:#eee;border:1px solid #666b78;border-radius:7px;padding:6px 11px;font-size:11px;font-weight:700;cursor:pointer}
-      .hash-range button:hover{border-color:#85b98a}
+      .hash-range button:disabled{cursor:default;opacity:.75}
+      .hash-range button:hover:not(:disabled){border-color:#85b98a}
       .hash-range button.active{background:rgba(101,196,102,.15);border-color:var(--yerb,#65c466);color:#e2ffe4}
+      .hash-loading{min-height:340px;display:flex;align-items:center;justify-content:center;color:#819284;font-size:13px}
       .hash-metrics{display:grid;grid-template-columns:repeat(5,minmax(130px,1fr));gap:10px;margin:14px 0}
       .hash-metric{border:1px solid #2d4332;border-radius:9px;padding:11px 13px;background:#141816}
       .hash-metric span{display:block;color:#9caf9d;font-size:11px}
@@ -220,7 +236,10 @@
         get(`/api/pool/history?hours=${r.hours}&bucket=${r.bucket}&_=${Date.now()}`).catch(()=>[]),
         get(`/api/luck?_=${Date.now()}`).catch(()=>null)
       ]);
-      if(!history.length||!luck) return;
+      if(!history.length||!luck){
+        card.innerHTML='<div class="hash-head"><div><h3>Network Hash vs Pool Hash</h3><div class="muted small">Hashrate history is temporarily unavailable.</div></div></div><div class="hash-loading">Waiting for hashrate data…</div>';
+        return;
+      }
 
       const difficulty=Number(luck.network_difficulty||0);
       const networkNow=difficulty>0?difficulty*DIFF1_HASHES/BLOCK_TARGET_SECONDS:0;
@@ -259,11 +278,26 @@
 
   function install(){
     styles();
-    const wait=()=>{
-      if(combinedCard()) render();
-      else setTimeout(wait,100);
+
+    // The dashboard itself is populated asynchronously. Watch for the legacy
+    // chart cards and claim them on the same frame they are inserted rather
+    // than polling every 100 ms and leaving them visible during API fetches.
+    const app=document.querySelector('main#app');
+    let started=false;
+    const start=()=>{
+      const card=combinedCard();
+      if(!card) return false;
+      if(!started){started=true;render();}
+      return true;
     };
-    wait();
+
+    if(!start() && app){
+      const observer=new MutationObserver(()=>{
+        if(start()) observer.disconnect();
+      });
+      observer.observe(app,{childList:true,subtree:true});
+    }
+
     setInterval(()=>render(),15000);
   }
 
