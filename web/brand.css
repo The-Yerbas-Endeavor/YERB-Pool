@@ -257,3 +257,157 @@ main#app:has(> .grid)>section:not(:first-of-type){
     grid-template-columns:1fr;
   }
 }
+
+/* Combined hashrate chart polish. Keep this purely visual so the native
+   dashboard renderer remains the single source of chart behavior/data. */
+#combined-hash-card{
+  position:relative;
+  overflow:hidden;
+  border-color:#31563a!important;
+  border-radius:14px;
+  background:
+    radial-gradient(circle at 11% -16%,rgba(101,196,102,.11),transparent 24rem),
+    radial-gradient(circle at 92% 12%,rgba(69,163,255,.08),transparent 25rem),
+    linear-gradient(155deg,#171c18 0%,#141816 55%,#121614 100%);
+  box-shadow:0 16px 42px rgba(0,0,0,.22),inset 0 1px 0 rgba(255,255,255,.025);
+}
+#combined-hash-card:before{
+  content:"";
+  position:absolute;
+  inset:0;
+  pointer-events:none;
+  background:linear-gradient(90deg,rgba(101,196,102,.22),rgba(69,163,255,.16));
+  height:2px;
+  opacity:.75;
+}
+#combined-hash-card .hash-head h3{
+  margin:0 0 5px;
+  font-size:21px;
+  letter-spacing:-.45px;
+  color:#f2f8f3;
+}
+#combined-hash-card .hash-head .muted{color:#92a596}
+#combined-hash-card .hash-range{gap:8px}
+#combined-hash-card .hash-range button{
+  border-radius:999px;
+  padding:7px 13px;
+  border-color:#46534a;
+  background:linear-gradient(180deg,#222824,#191e1b);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.045);
+  transition:border-color .15s ease,box-shadow .15s ease,transform .15s ease,background .15s ease;
+}
+#combined-hash-card .hash-range button:hover{
+  border-color:#60916a;
+  transform:translateY(-1px);
+}
+#combined-hash-card .hash-range button.active{
+  color:#effff0;
+  border-color:#72d676;
+  background:linear-gradient(180deg,rgba(101,196,102,.25),rgba(101,196,102,.10));
+  box-shadow:0 0 0 1px rgba(101,196,102,.12),0 0 16px rgba(101,196,102,.20),inset 0 1px 0 rgba(255,255,255,.08);
+}
+#combined-hash-card .hash-metrics{gap:11px;margin:16px 0 12px}
+#combined-hash-card .hash-metric{
+  position:relative;
+  overflow:hidden;
+  min-height:82px;
+  padding:12px 14px;
+  border-color:#304a36;
+  background:linear-gradient(145deg,rgba(24,34,27,.96),rgba(17,23,19,.96));
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.025),0 8px 22px rgba(0,0,0,.12);
+}
+#combined-hash-card .hash-metric:before{
+  content:"";
+  position:absolute;
+  left:0;
+  top:0;
+  bottom:0;
+  width:2px;
+  background:#65c466;
+  opacity:.7;
+}
+#combined-hash-card .hash-metric:nth-child(2):before{background:#45a3ff}
+#combined-hash-card .hash-metric:nth-child(3):before{background:#72d6be}
+#combined-hash-card .hash-metric:nth-child(4):before{background:#d3a847}
+#combined-hash-card .hash-metric strong{font-size:20px;letter-spacing:-.25px}
+#combined-hash-card .hash-metric small{color:#718a76}
+#combined-hash-card .combined-chart-wrap{
+  margin-top:14px;
+  border:1px solid rgba(72,102,79,.34);
+  border-radius:12px;
+  padding:4px 3px 0;
+  background:
+    radial-gradient(circle at 22% 0%,rgba(101,196,102,.035),transparent 28rem),
+    linear-gradient(180deg,rgba(8,12,9,.38),rgba(8,12,9,.12));
+  box-shadow:inset 0 1px 14px rgba(0,0,0,.15);
+}
+#combined-hash-card .combined-hash-chart{height:420px}
+#combined-hash-card .combined-hash-chart .gridline{
+  stroke:#28332b;
+  stroke-width:1;
+  stroke-dasharray:3 4;
+  opacity:.9;
+}
+#combined-hash-card .combined-hash-chart .pool-line{
+  stroke:#69d16c;
+  stroke-width:3;
+  stroke-linecap:round;
+  stroke-linejoin:round;
+  filter:drop-shadow(0 0 4px rgba(101,196,102,.55));
+}
+#combined-hash-card .combined-hash-chart .network-line{
+  stroke:#4ba8ff;
+  stroke-width:2.8;
+  stroke-linecap:round;
+  stroke-linejoin:round;
+  filter:drop-shadow(0 0 4px rgba(69,163,255,.45));
+}
+#combined-hash-card .combined-hash-chart .pool-area{fill:rgba(101,196,102,.15)}
+#combined-hash-card .combined-hash-chart .network-area{fill:rgba(69,163,255,.09)}
+#combined-hash-card .combined-hash-chart .axis{font-size:10.5px;fill:#839288}
+#combined-hash-card .combined-hash-chart .pool-axis{fill:#82e087;font-weight:600}
+#combined-hash-card .combined-hash-chart .net-axis{fill:#71baff;font-weight:600}
+#combined-hash-card .hash-crosshair{
+  stroke:#b3c2b6;
+  stroke-width:1;
+  stroke-dasharray:3 4;
+  filter:drop-shadow(0 0 3px rgba(255,255,255,.18));
+}
+#combined-hash-card .combined-hash-tooltip{
+  min-width:205px;
+  padding:11px 13px;
+  border-color:#3d6647;
+  border-radius:10px;
+  background:rgba(8,14,10,.97);
+  box-shadow:0 12px 34px rgba(0,0,0,.48),0 0 0 1px rgba(101,196,102,.06);
+  backdrop-filter:blur(7px);
+  font-size:12px;
+}
+#combined-hash-card .hash-legend{
+  gap:12px;
+  margin-top:12px;
+}
+#combined-hash-card .hash-legend span{
+  padding:5px 9px;
+  border:1px solid #2b3d30;
+  border-radius:999px;
+  background:#121713;
+  color:#b9c7bb;
+}
+#combined-hash-card .hash-footer{
+  margin-top:10px;
+  color:#718477;
+}
+#combined-hash-card .hash-footer span:last-child:before{
+  content:"● ";
+  color:#65c466;
+  text-shadow:0 0 7px rgba(101,196,102,.55);
+}
+@media(max-width:900px){
+  #combined-hash-card .combined-hash-chart{height:360px}
+}
+@media(max-width:520px){
+  #combined-hash-card{border-radius:10px}
+  #combined-hash-card .combined-hash-chart{height:310px}
+  #combined-hash-card .hash-range button{padding:6px 10px}
+}
