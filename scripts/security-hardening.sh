@@ -11,6 +11,8 @@ POOL_USER="${YERB_POOL_USER:-yerbpool}"
 WALLET_USER="${YERB_WALLET_USER:-yerbas}"
 ADMIN_USER="${YERB_ADMIN_USER:-}"
 STRATUM_PORT="${YERB_STRATUM_PORT:-3333}"
+SECURITY_STATE_DIR="/etc/yerb-pool"
+ADMIN_SETUP_MARKER="${SECURITY_STATE_DIR}/admin-account-setup-complete"
 
 log() { printf '[security] %s\n' "$*"; }
 
@@ -38,26 +40,68 @@ create_system_users() {
     fi
 }
 
+find_existing_human_admin() {
+    local user uid shell groups
+    while IFS=: read -r user _ uid _ _ _ shell; do
+        [[ "$uid" =~ ^[0-9]+$ ]] || continue
+        (( uid >= 1000 )) || continue
+        [[ "$user" != "$POOL_USER" && "$user" != "$WALLET_USER" ]] || continue
+        [[ "$shell" != */nologin && "$shell" != */false ]] || continue
+        groups="$(id -nG "$user" 2>/dev/null || true)"
+        if [[ " $groups " == *" sudo "* || " $groups " == *" admin "* ]]; then
+            printf '%s\n' "$user"
+            return 0
+        fi
+    done < /etc/passwd
+    return 1
+}
+
+mark_admin_setup_complete() {
+    $SUDO mkdir -p "$SECURITY_STATE_DIR"
+    $SUDO touch "$ADMIN_SETUP_MARKER"
+    $SUDO chmod 700 "$SECURITY_STATE_DIR"
+    $SUDO chmod 600 "$ADMIN_SETUP_MARKER"
+}
+
 create_admin_user() {
-    # A human administrator is optional because an unattended install cannot
-    # safely invent a password or SSH key. Set YERB_ADMIN_USER=name before
-    # running the installer, or answer the interactive prompt.
-    if [[ -z "$ADMIN_USER" && -t 0 ]]; then
-        local answer=""
-        read -r -p "Create a non-root sudo administrator account now? (y/N): " answer
-        if [[ "$answer" =~ ^[Yy]$ ]]; then
-            read -r -p "Administrator username: " ADMIN_USER
+    local existing_admin=""
+
+    # An explicitly supplied YERB_ADMIN_USER always wins. Otherwise the
+    # interactive administrator question is a first-install question only.
+    # Existing human sudo users also count as completed setup, which makes
+    # upgrades from older installers immediately non-interactive.
+    if [[ -z "$ADMIN_USER" ]]; then
+        existing_admin="$(find_existing_human_admin || true)"
+        if [[ -n "$existing_admin" ]]; then
+            log "Existing non-root administrator detected: $existing_admin"
+            mark_admin_setup_complete
+            return 0
+        fi
+
+        if $SUDO test -f "$ADMIN_SETUP_MARKER"; then
+            log "Administrator account setup was already handled; skipping prompt."
+            return 0
+        fi
+
+        if [[ -t 0 ]]; then
+            local answer=""
+            read -r -p "Create a non-root sudo administrator account now? (y/N): " answer
+            if [[ "$answer" =~ ^[Yy]$ ]]; then
+                read -r -p "Administrator username: " ADMIN_USER
+            fi
         fi
     fi
 
     if [[ -z "$ADMIN_USER" ]]; then
-        log "No human administrator requested; skipping admin account creation."
+        log "No human administrator requested during initial setup."
         log "You can later run: adduser USER && usermod -aG sudo USER"
+        mark_admin_setup_complete
         return 0
     fi
 
     if [[ ! "$ADMIN_USER" =~ ^[a-z_][a-z0-9_-]*$ ]]; then
         log "WARNING: invalid administrator username '$ADMIN_USER'; skipping."
+        mark_admin_setup_complete
         return 0
     fi
 
@@ -80,6 +124,7 @@ create_admin_user() {
         fi
     fi
 
+    mark_admin_setup_complete
     log "IMPORTANT: verify SSH key login for '$ADMIN_USER' before disabling root/password SSH."
 }
 
