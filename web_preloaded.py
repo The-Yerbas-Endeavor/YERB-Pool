@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 """Production web entry point for the YERB Pool dashboard.
 
-The combined network/pool hashrate chart now lives directly in web/index.html.
-This wrapper only applies production labels/branding and additive live widgets;
-it no longer rewrites or injects the dashboard chart.
+The combined network/pool hashrate chart lives directly in web/index.html.
+This wrapper applies production labels/branding and additive live widgets only.
+Legacy chart injectors are explicitly filtered so they cannot replace the native
+chart after the page has loaded.
 """
 
 import mimetypes
+import re
 from http.server import ThreadingHTTPServer
 
 import web_controls as controls
@@ -38,8 +40,8 @@ class PreloadedControlHandler(controls.ControlHandler):
             "latest=Number(x.hashrate||x.combined_hashrate||0)",
         )
 
-        # The base dashboard owns its combined chart and intentionally does not
-        # rebuild the whole page on a timer. Do not inject a second chart loader.
+        # The native dashboard owns its combined chart. Never allow a recurring
+        # full-dashboard redraw to destroy/recreate it.
         text = text.replace("if(location.pathname==='/')setInterval(dashboard,10000);", "")
         text = text.replace("if(location.pathname.startsWith('/worker/'))setInterval(worker,30000);", "")
         text = text.replace("if(location.pathname.startsWith('/account/'))setInterval(account,30000);", "")
@@ -48,17 +50,43 @@ class PreloadedControlHandler(controls.ControlHandler):
             '<link rel="stylesheet" href="/brand.css?v=1"></head>',
         )
 
-        # Keep the initial luck-panel population if present, but never redraw it
-        # every 10 seconds because that causes visible page movement.
-        luck_script = base.LUCK_SCRIPT.replace(
+        # LUCK_SCRIPT is assembled additively through several imported web
+        # layers. Older releases appended standalone chart renderers there.
+        # Filter them at the final production boundary so an old renderer can
+        # never wake up later and replace the native chart (for example after a
+        # 10/15 second timer).
+        luck_script = base.LUCK_SCRIPT
+        luck_script = re.sub(
+            r'<script[^>]+src=["\'][^"\']*(?:network_hash_chart|hashrate_chart_fast|hashrate_preload_bridge)\.js[^"\']*["\'][^>]*></script>',
+            '',
+            luck_script,
+            flags=re.IGNORECASE,
+        )
+        luck_script = re.sub(
+            r'setInterval\s*\(\s*renderLuck\s*,\s*10000\s*\)\s*;?',
+            '',
+            luck_script,
+        )
+        luck_script = luck_script.replace(
             "setTimeout(renderLuck,800); setInterval(renderLuck,10000);",
             "setTimeout(renderLuck,800);",
         )
 
-        body = text.replace(
+        body_text = text.replace(
             "</body>",
-            luck_script + '<script src="/reward_labels.js?v=6"></script></body>',
-        ).encode()
+            luck_script + '<script src="/reward_labels.js?v=7"></script></body>',
+        )
+
+        # Defense in depth: strip any legacy chart-loader tag that may already
+        # exist in the source template itself. The only chart implementation on
+        # the home page must be the one embedded in web/index.html.
+        body_text = re.sub(
+            r'<script[^>]+src=["\'][^"\']*(?:network_hash_chart|hashrate_chart_fast|hashrate_preload_bridge)\.js[^"\']*["\'][^>]*></script>',
+            '',
+            body_text,
+            flags=re.IGNORECASE,
+        )
+        body = body_text.encode()
 
         self.send_response(200)
         self.send_header(
@@ -76,6 +104,6 @@ if __name__ == "__main__":
     controls._ensure_chart_index()
     print(
         f"YERB Pool web/admin listening on http://{base.HOST}:{base.PORT} "
-        "(native dashboard chart enabled)"
+        "(native dashboard chart enabled; legacy chart loaders filtered)"
     )
     ThreadingHTTPServer((base.HOST, base.PORT), PreloadedControlHandler).serve_forever()
