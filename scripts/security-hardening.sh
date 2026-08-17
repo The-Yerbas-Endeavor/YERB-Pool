@@ -24,14 +24,14 @@ create_system_users() {
     log "Ensuring dedicated non-root service users exist..."
 
     if ! id "$POOL_USER" >/dev/null 2>&1; then
-        $SUDO useradd --system --home /opt/yerb-pool --shell /usr/sbin/nologin "$POOL_USER"
+        $SUDO useradd --system --user-group --home /opt/yerb-pool --shell /usr/sbin/nologin "$POOL_USER"
         log "Created pool service user: $POOL_USER"
     else
         log "Pool service user already exists: $POOL_USER"
     fi
 
     if ! id "$WALLET_USER" >/dev/null 2>&1; then
-        $SUDO useradd --system --create-home --home-dir /home/yerbas --shell /usr/sbin/nologin "$WALLET_USER"
+        $SUDO useradd --system --user-group --create-home --home-dir /home/yerbas --shell /usr/sbin/nologin "$WALLET_USER"
         log "Created wallet service user: $WALLET_USER"
     else
         log "Wallet service user already exists: $WALLET_USER"
@@ -155,11 +155,19 @@ EOF
     log "Applied LimitNOFILE=65536 to YERB Pool services."
 }
 
+install_security_packages() {
+    $SUDO apt-get update
+    if [[ -n "$SUDO" ]]; then
+        $SUDO env DEBIAN_FRONTEND=noninteractive apt-get install -y ufw fail2ban unattended-upgrades sudo
+    else
+        DEBIAN_FRONTEND=noninteractive apt-get install -y ufw fail2ban unattended-upgrades sudo
+    fi
+}
+
 main() {
     require_root_access
     log "Installing host security packages..."
-    $SUDO apt-get update
-    DEBIAN_FRONTEND=noninteractive $SUDO apt-get install -y ufw fail2ban unattended-upgrades sudo
+    install_security_packages
 
     create_system_users
     create_admin_user
