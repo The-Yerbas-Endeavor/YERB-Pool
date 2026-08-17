@@ -8,6 +8,7 @@ trend display, but never provide the headline/current hashrate numbers.
 import contextlib
 import mimetypes
 import sqlite3
+import threading
 import time
 from http.server import ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
@@ -19,6 +20,8 @@ from yerbpool.admin_settings import get_pool_fee_percent
 COIN = 100_000_000
 ACTIVE_WINDOW = 600
 HASHRATE_WINDOW = 120
+_POOL_HISTORY_CACHE = {}
+_POOL_HISTORY_CACHE_LOCK = threading.Lock()
 
 
 @contextlib.contextmanager
@@ -209,6 +212,15 @@ def api_pool_history(hours=24, bucket_seconds=300):
     now = int(time.time())
     end = (now // bucket_seconds) * bucket_seconds
     start = end - hours * 3600
+    cache_key = (hours, bucket_seconds, end)
+
+    # A history bucket cannot change after its end boundary moves forward, so
+    # cache each completed window. This makes refreshes and range switching
+    # effectively instant instead of repeatedly aggregating the shares table.
+    with _POOL_HISTORY_CACHE_LOCK:
+        cached = _POOL_HISTORY_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
 
     with base.db() as con:
         raw = base.rows(
@@ -239,6 +251,12 @@ def api_pool_history(hours=24, bucket_seconds=300):
             }
         )
         t += bucket_seconds
+
+    with _POOL_HISTORY_CACHE_LOCK:
+        _POOL_HISTORY_CACHE[cache_key] = history
+        if len(_POOL_HISTORY_CACHE) > 24:
+            oldest = next(iter(_POOL_HISTORY_CACHE))
+            _POOL_HISTORY_CACHE.pop(oldest, None)
     return history
 
 
@@ -385,9 +403,12 @@ class LiveHandler(base.Handler):
                 '<div class="muted">Balance</div>',
                 '<div class="muted">Mature Balance</div>',
             )
+            # The combined graph owns historical data. The base dashboard no
+            # longer blocks first paint by running its own duplicate history
+            # query before it can render the page.
             text = text.replace(
                 "const active=w.filter(x=>x.active).slice(0,24);const stats=(await Promise.all(active.map(x=>get('/api/worker/'+x.id+'/stats?hours=24&bucket=300').catch(()=>null)))).filter(Boolean);const h=aggregateHistory(stats);",
-                "const h=await get('/api/pool/history?hours=24&bucket=300').catch(()=>[]);",
+                "const h=[];",
             )
             text = text.replace(
                 "const cards=[['Miners',s.accounts.accounts,'/miners'],['Active Workers',s.workers.active_workers,'/workers'],",
