@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Production web entry point with authenticated payout and user controls."""
 
+import sqlite3
 from http.server import ThreadingHTTPServer
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 import web_enhanced as enhanced
 from yerbpool.payout_control import (
@@ -22,6 +23,62 @@ from yerbpool.user_controls import (
 
 
 enhanced.admin.live.base.LUCK_SCRIPT += '<script src="/active_miners_24h.js?v=1"></script>'
+
+
+def _ensure_chart_index():
+    """Install a covering index used by pool-wide historical hashrate queries."""
+    path = enhanced.admin.live.base.DB_PATH
+    con = sqlite3.connect(path)
+    try:
+        con.execute(
+            "CREATE INDEX IF NOT EXISTS idx_shares_ts_accepted_diff "
+            "ON shares(ts, accepted, difficulty)"
+        )
+        con.commit()
+    finally:
+        con.close()
+
+
+def _hashrate_chart_snapshot(hours=24, bucket=600):
+    """Return everything the combined dashboard graph needs in one request."""
+    hours = min(max(int(hours), 1), 168)
+    bucket = min(max(int(bucket), 60), 3600)
+    live = enhanced.admin.live
+    base = live.base
+
+    history = live.api_pool_history(hours, bucket)
+    pool_hashrate = live._recent_pool_hashrate()
+
+    network_hashrate = None
+    network_difficulty = None
+    try:
+        info = base.rpc_call("getmininginfo")
+        if isinstance(info, dict):
+            if info.get("networkhashps") is not None:
+                network_hashrate = float(info["networkhashps"])
+            if info.get("difficulty") is not None:
+                network_difficulty = float(info["difficulty"])
+    except Exception:
+        pass
+
+    if network_hashrate is None:
+        try:
+            network_hashrate = float(base.rpc_call("getnetworkhashps"))
+        except Exception:
+            network_hashrate = None
+    if network_difficulty is None:
+        try:
+            network_difficulty = float(base.current_network_difficulty())
+        except Exception:
+            network_difficulty = None
+
+    return {
+        "history": history,
+        "pool_hashrate": pool_hashrate,
+        "network_hashrate": network_hashrate,
+        "network_difficulty": network_difficulty,
+        "hashrate_window_seconds": live.HASHRATE_WINDOW,
+    }
 
 
 def _control_snapshot():
@@ -95,7 +152,19 @@ def _inject_user_admin(html):
 
 class ControlHandler(enhanced.EnhancedHandler):
     def do_GET(self):
-        path = urlparse(self.path).path.rstrip("/") or "/"
+        parsed = urlparse(self.path)
+        path = parsed.path.rstrip("/") or "/"
+        if path == "/api/hashrate/chart":
+            query = parse_qs(parsed.query)
+            try:
+                return self.send_json(
+                    _hashrate_chart_snapshot(
+                        (query.get("hours") or [24])[0],
+                        (query.get("bucket") or [600])[0],
+                    )
+                )
+            except Exception as exc:
+                return self.send_json({"error": str(exc)}, 500)
         if path == "/admin":
             if enhanced.admin._admin_enabled() and not self._require_admin():
                 return
@@ -214,6 +283,7 @@ class ControlHandler(enhanced.EnhancedHandler):
 
 if __name__ == "__main__":
     ensure_user_control_schema(enhanced.admin.live.base.DB_PATH)
+    _ensure_chart_index()
     print(
         f"YERB Pool web/admin listening on http://{enhanced.admin.live.base.HOST}:{enhanced.admin.live.base.PORT} "
         "(health diagnostics, payout controls and user controls enabled)"
