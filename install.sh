@@ -58,6 +58,15 @@ verify_native_install() {
 echo "Creating verified pre-update backup..."
 bash "$ROOT/scripts/backup-production.sh"
 
+# A fresh pool requires a local Yerbas Core wallet/RPC daemon. This bootstrap
+# is idempotent: an existing yerbas user, wallet data directory, yerbas.conf,
+# binaries, and configured service are preserved. On a new host it installs
+# Core from the latest Yerbas GitHub release, creates secure local-only RPC
+# credentials, starts yerbasd, creates a dedicated pool wallet address, and
+# writes those values into the pool config before application deployment.
+echo "Checking Yerbas Core installation and local RPC configuration..."
+bash "$ROOT/scripts/install-yerbas-core.sh"
+
 echo "Pre-building required native GhostRider library..."
 bash "$ROOT/scripts/build-native.sh"
 verify_native_build
