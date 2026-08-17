@@ -51,6 +51,13 @@ verify_native_install() {
     fi
 }
 
+# Always snapshot live accounting/configuration before touching production.
+# Fresh installs simply report that there is nothing to back up yet. The
+# backup script uses SQLite's online backup API so WAL activity is captured in
+# a consistent database snapshot while miners remain connected.
+echo "Creating verified pre-update backup..."
+bash "$ROOT/scripts/backup-production.sh"
+
 echo "Pre-building required native GhostRider library..."
 bash "$ROOT/scripts/build-native.sh"
 verify_native_build
