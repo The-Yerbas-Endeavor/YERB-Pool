@@ -14,6 +14,15 @@
   let preload=window.__YERB_HASHRATE_PRELOAD__ || null;
   let rendering=false;
   let initialized=false;
+  const scaleMax={};
+
+  function stableScale(kind, candidate){
+    const key=selected+':'+kind;
+    const wanted=Math.max(Number(candidate||0),1)*1.12;
+    if(!scaleMax[key]) scaleMax[key]=wanted;
+    else if(wanted>scaleMax[key]) scaleMax[key]=wanted;
+    return scaleMax[key];
+  }
 
   const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const hashRate=v=>{v=Number(v||0);if(v>=1e9)return(v/1e9).toFixed(2)+' GH/s';if(v>=1e6)return(v/1e6).toFixed(2)+' MH/s';if(v>=1e3)return(v/1e3).toFixed(2)+' kH/s';return v.toFixed(1)+' H/s';};
@@ -64,7 +73,7 @@
   function readSamples(){try{const a=JSON.parse(localStorage.getItem(STORAGE_KEY)||'[]');return Array.isArray(a)?a:[];}catch(_){return[];}}
   function sampleNetwork(v){
     const now=Math.floor(Date.now()/1000);let a=readSamples().filter(x=>Number(x.ts)>now-8*86400);const last=a[a.length-1];
-    if(!last||now-Number(last.ts)>=60){a.push({ts:now,hashrate:Number(v||0)});if(a.length>12000)a=a.slice(-12000);try{localStorage.setItem(STORAGE_KEY,JSON.stringify(a));}catch(_){}}
+    if(!last||now-Number(last.ts)>=60){a.push({ts:now,hashrate:Number(v||0)});if(a.length>12000)a=a.slice(-12000);try{localStorage.setItem(STORAGE_KEY,JSON.stringify(a));}catch(_){} }
     return a;
   }
   function networkAt(a,ts,fallback){if(!a.length)return fallback;let best=a[0];for(const x of a)if(Math.abs(Number(x.ts)-ts)<Math.abs(Number(best.ts)-ts))best=x;return Number(best.hashrate||fallback);}
@@ -74,7 +83,8 @@
   function makeSvg(history,samples,networkNow){
     const W=1120,H=340,L=72,R=78,T=22,B=46,iw=W-L-R,ih=H-T-B;
     const rows=history.map(x=>({ts:Number(x.ts||0),pool:Number(x.hashrate||0),network:networkAt(samples,Number(x.ts||0),networkNow)}));
-    const pmax=Math.max(...rows.map(x=>x.pool),1)*1.12,nmax=Math.max(...rows.map(x=>x.network),networkNow,1)*1.12;
+    const pmax=stableScale('pool',Math.max(...rows.map(x=>x.pool),1));
+    const nmax=stableScale('network',Math.max(...rows.map(x=>x.network),networkNow,1));
     const min=rows[0]?.ts||0,max=rows[rows.length-1]?.ts||min+1;
     const px=ts=>L+(ts-min)/Math.max(1,max-min)*iw,pyP=v=>T+ih-Number(v||0)/pmax*ih,pyN=v=>T+ih-Number(v||0)/nmax*ih;
     const pp=rows.map(r=>`${px(r.ts).toFixed(1)},${pyP(r.pool).toFixed(1)}`).join(' '),np=rows.map(r=>`${px(r.ts).toFixed(1)},${pyN(r.network).toFixed(1)}`).join(' ');
