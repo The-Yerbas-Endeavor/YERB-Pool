@@ -2,7 +2,11 @@ import asyncio
 import logging
 
 from yerbpool.stratum import MinerSession, StratumServer
-from yerbpool.user_controls import is_ip_banned, record_worker_ip
+from yerbpool.user_controls import (
+    is_account_suspended,
+    is_ip_banned,
+    record_worker_ip,
+)
 
 
 def _peer_ip(writer):
@@ -17,18 +21,46 @@ class ControlledMinerSession(MinerSession):
         super().__init__(pool, reader, writer)
         self.peer_ip = peer_ip
 
+    def _worker_address(self, login=None):
+        value = str(login if login is not None else self.worker or "")
+        return self.pool.db.split_worker(value)[0] if value else ""
+
+    async def _reject_suspended(self, rid):
+        address = self._worker_address()
+        logging.warning("Blocked suspended miner address %s ip=%s", address, self.peer_ip or "unknown")
+        await self.send({
+            "id": rid,
+            "result": False,
+            "error": [24, "Miner account suspended from pool", None],
+        })
+        self.writer.close()
+
     async def handle(self, req):
+        rid = req.get("id") if isinstance(req, dict) else None
         if self.peer_ip and is_ip_banned(self.pool.db, self.peer_ip):
             logging.warning("Blocked banned miner IP %s", self.peer_ip)
             await self.send({
-                "id": req.get("id") if isinstance(req, dict) else None,
+                "id": rid,
                 "result": False,
                 "error": [24, "IP address banned from pool", None],
             })
             self.writer.close()
             return
 
+        if self.worker and is_account_suspended(self.pool.db, self._worker_address()):
+            await self._reject_suspended(rid)
+            return
+
         method = req.get("method") if isinstance(req, dict) else None
+        params = req.get("params") or [] if isinstance(req, dict) else []
+        if method == "mining.authorize":
+            login = str(params[0]) if params else ""
+            address = self._worker_address(login)
+            if address and is_account_suspended(self.pool.db, address):
+                self.worker = login
+                await self._reject_suspended(rid)
+                return
+
         await super().handle(req)
         if method == "mining.authorize" and self.authorized and self.worker and self.peer_ip:
             try:
