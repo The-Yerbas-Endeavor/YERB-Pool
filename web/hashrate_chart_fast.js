@@ -85,27 +85,33 @@
   }
 
   function bind(c,history,samples,networkNow){
-    c.querySelectorAll('[data-range]').forEach(b=>b.onclick=()=>{if(!RANGES[b.dataset.range]||b.dataset.range===selected)return;selected=b.dataset.range;render();});
+    c.querySelectorAll('[data-range]').forEach(b=>b.onclick=()=>{if(!RANGES[b.dataset.range]||b.dataset.range===selected)return;selected=b.dataset.range;render(true);});
     const el=c.querySelector('.combined-hash-chart'),tip=c.querySelector('.combined-hash-tooltip'),cross=c.querySelector('.hash-crosshair');if(!el||!tip||!cross||!history.length)return;
     const W=1120,L=72,R=78,min=Number(history[0].ts||0),max=Number(history[history.length-1].ts||min+1);
     el.onmousemove=e=>{const r=el.getBoundingClientRect(),sx=Math.max(L,Math.min(W-R,(e.clientX-r.left)/r.width*W)),target=min+(max-min)*(sx-L)/(W-L-R);let best=history[0];for(const x of history)if(Math.abs(Number(x.ts)-target)<Math.abs(Number(best.ts)-target))best=x;const pool=Number(best.hashrate||0),net=networkAt(samples,Number(best.ts),networkNow),share=net>0?pool/net*100:0,x=L+(Number(best.ts)-min)/Math.max(1,max-min)*(W-L-R);cross.setAttribute('x1',x);cross.setAttribute('x2',x);cross.style.opacity='1';tip.hidden=false;tip.innerHTML=`<strong>${esc(new Date(Number(best.ts)*1000).toLocaleString())}</strong><br><span style="color:#80d985">Pool</span>: ${esc(hashRate(pool))}<br><span style="color:#6eb7ff">Network</span>: ${esc(hashRate(net))}<br>Pool share: ${share.toFixed(2)}%`;tip.style.left=`${x/W*100}%`;tip.style.top='58%';};
     el.onmouseleave=()=>{tip.hidden=true;cross.style.opacity='0';};
   }
 
-  async function render(){
+  async function render(showLoading=false){
     if(rendering)return;
     const c=findCard();
     if(!c)return;
     rendering=true;
     c.dataset.hashFastClaimed='1';
-    c.innerHTML=`<div class="hash-head"><div><h3>Network Hash vs Pool Hash</h3><div class="muted small">Pool and Yerbas network hashrate over the selected time range.</div></div><div class="hash-range">${Object.keys(RANGES).map(k=>`<button type="button" disabled class="${k===selected?'active':''}">${k}</button>`).join('')}</div></div><div class="hash-loading">Loading hashrate history…</div>`;
+    if(!initialized || showLoading){
+      c.innerHTML=`<div class="hash-head"><div><h3>Network Hash vs Pool Hash</h3><div class="muted small">Pool and Yerbas network hashrate over the selected time range.</div></div><div class="hash-range">${Object.keys(RANGES).map(k=>`<button type="button" disabled class="${k===selected?'active':''}">${k}</button>`).join('')}</div></div><div class="hash-loading">Loading hashrate history…</div>`;
+    }
     try{
       const data=await fetchData(selected);
       const history=Array.isArray(data?.history)?data.history:[];
-      if(!data||!history.length){c.innerHTML='<h3>Network Hash vs Pool Hash</h3><div class="hash-loading">Waiting for hashrate data…</div>';return;}
+      if(!data||!history.length){
+        if(!initialized)c.innerHTML='<h3>Network Hash vs Pool Hash</h3><div class="hash-loading">Waiting for hashrate data…</div>';
+        return;
+      }
       const networkNow=Number(data.network_hashrate||0),poolNow=Number(data.pool_hashrate||0),samples=sampleNetwork(networkNow),r=RANGES[selected],cut=Math.floor(Date.now()/1000)-r.hours*3600,rangeSamples=samples.filter(x=>Number(x.ts)>=cut);
       const ps=stats(history.map(x=>Number(x.hashrate||0))),ns=stats(history.map(x=>networkAt(rangeSamples,Number(x.ts||0),networkNow))),share=networkNow>0?poolNow/networkNow*100:0;
-      c.innerHTML=`<div class="hash-head"><div><h3>Network Hash vs Pool Hash</h3><div class="muted small">Pool and Yerbas network hashrate over the selected time range.</div></div><div class="hash-range">${Object.keys(RANGES).map(k=>`<button type="button" data-range="${k}" class="${k===selected?'active':''}">${k}</button>`).join('')}</div></div><div class="hash-metrics"><div class="hash-metric"><span>Pool now</span><strong>${hashRate(poolNow)}</strong><small>${selected} average ${hashRate(ps.avg)}</small></div><div class="hash-metric"><span>Network now</span><strong>${hashRate(networkNow)}</strong><small>${selected} average ${hashRate(ns.avg)}</small></div><div class="hash-metric"><span>Pool share</span><strong>${share.toFixed(2)}%</strong><small>of current network hash</small></div><div class="hash-metric"><span>Peak pool</span><strong>${hashRate(ps.peak)}</strong><small>${selected} peak</small></div><div class="hash-metric"><span>Peak network</span><strong>${hashRate(ns.peak)}</strong><small>${selected} peak</small></div></div>${makeSvg(history,rangeSamples,networkNow)}<div class="hash-legend"><span><i class="hash-dot pool"></i>Pool hashrate</span><span><i class="hash-dot net"></i>Network hashrate</span></div><div class="hash-footer"><span>Left scale: pool hashrate · Right scale: network hashrate</span><span>Updated ${new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'})}</span></div>`;
+      const nextHtml=`<div class="hash-head"><div><h3>Network Hash vs Pool Hash</h3><div class="muted small">Pool and Yerbas network hashrate over the selected time range.</div></div><div class="hash-range">${Object.keys(RANGES).map(k=>`<button type="button" data-range="${k}" class="${k===selected?'active':''}">${k}</button>`).join('')}</div></div><div class="hash-metrics"><div class="hash-metric"><span>Pool now</span><strong>${hashRate(poolNow)}</strong><small>${selected} average ${hashRate(ps.avg)}</small></div><div class="hash-metric"><span>Network now</span><strong>${hashRate(networkNow)}</strong><small>${selected} average ${hashRate(ns.avg)}</small></div><div class="hash-metric"><span>Pool share</span><strong>${share.toFixed(2)}%</strong><small>of current network hash</small></div><div class="hash-metric"><span>Peak pool</span><strong>${hashRate(ps.peak)}</strong><small>${selected} peak</small></div><div class="hash-metric"><span>Peak network</span><strong>${hashRate(ns.peak)}</strong><small>${selected} peak</small></div></div>${makeSvg(history,rangeSamples,networkNow)}<div class="hash-legend"><span><i class="hash-dot pool"></i>Pool hashrate</span><span><i class="hash-dot net"></i>Network hashrate</span></div><div class="hash-footer"><span>Left scale: pool hashrate · Right scale: network hashrate</span><span>Updated ${new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'})}</span></div>`;
+      c.innerHTML=nextHtml;
       bind(c,history,rangeSamples,networkNow);
       initialized=true;
     }finally{rendering=false;}
@@ -124,5 +130,6 @@
   }
 
   start();
-  setInterval(()=>{if(initialized)render();},15000);
+  // Refresh silently. Keep the existing chart visible while fresh data is fetched.
+  setInterval(()=>{if(initialized)render(false);},15000);
 })();
