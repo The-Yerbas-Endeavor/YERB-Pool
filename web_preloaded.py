@@ -67,6 +67,10 @@ class PreloadedControlHandler(controls.ControlHandler):
             "Accepted GhostRider share work from currently tracked workers.",
             "Pool-wide GhostRider share work recorded during the last 24 hours.",
         )
+
+        # Never rebuild the entire dashboard on a timer. Full app.innerHTML
+        # replacement caused a visible flash and also destroyed/recreated the
+        # chart DOM. Live widgets update themselves independently.
         text = text.replace("if(location.pathname==='/')setInterval(dashboard,10000);", "")
         text = text.replace("if(location.pathname.startsWith('/worker/'))setInterval(worker,30000);", "")
         text = text.replace("if(location.pathname.startsWith('/account/'))setInterval(account,30000);", "")
@@ -83,9 +87,18 @@ if(location.pathname==='/'){
             '<link rel="stylesheet" href="/brand.css?v=1">' + preload + "</head>",
         )
 
+        # The legacy luck panel used to rewrite its entire panel every 10
+        # seconds. That redraw was visible as a page flash. Keep its initial
+        # population, but disable the recurring DOM rebuild. Other live status
+        # components continue refreshing without replacing the page structure.
+        luck_script = base.LUCK_SCRIPT.replace(
+            "setTimeout(renderLuck,800); setInterval(renderLuck,10000);",
+            "setTimeout(renderLuck,800);",
+        )
+
         body = text.replace(
             "</body>",
-            base.LUCK_SCRIPT + '<script src="/reward_labels.js?v=6"></script></body>',
+            luck_script + '<script src="/reward_labels.js?v=6"></script></body>',
         ).encode()
 
         self.send_response(200)
