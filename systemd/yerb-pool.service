@@ -7,10 +7,13 @@ Wants=network-online.target
 Type=simple
 User=yerbpool
 Group=yerbpool
-WorkingDirectory=/opt/YERB-Pool
-ExecStart=/usr/bin/python3 /opt/YERB-Pool/pool.py
+WorkingDirectory=/opt/yerb-pool
+ExecStartPre=/usr/bin/test -s /opt/yerb-pool/native/build/libyerb_ghostrider.so
+ExecStartPre=/usr/bin/python3 -c "from yerbpool.ghostrider import ensure_available; ensure_available()"
+ExecStart=/usr/bin/python3 /opt/yerb-pool/pool.py
 Restart=on-failure
-RestartSec=3
+RestartSec=10
+LimitNOFILE=65536
 NoNewPrivileges=true
 PrivateTmp=true
 
