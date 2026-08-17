@@ -108,6 +108,80 @@ PY
     echo "Installed Yerbas Core binaries in /usr/local/bin."
 }
 
+check_core_version() {
+    if [[ ! -x "$CORE_BIN" ]]; then
+        return
+    fi
+
+    echo "Checking Yerbas Core version..."
+    python3 - "$CORE_BIN" "$REPO" <<'PY'
+import json
+import re
+import subprocess
+import sys
+import urllib.request
+
+core_bin, repo = sys.argv[1:]
+
+try:
+    output = subprocess.check_output(
+        [core_bin, "--version"], stderr=subprocess.STDOUT, text=True, timeout=10
+    )
+except Exception as exc:
+    print(f"WARNING: Could not determine installed Yerbas Core version: {exc}")
+    raise SystemExit(0)
+
+match = re.search(r"(?<!\d)(\d+\.\d+\.\d+(?:\.\d+)?)(?!\d)", output)
+if not match:
+    print("WARNING: Could not parse installed Yerbas Core version.")
+    first = output.strip().splitlines()
+    if first:
+        print(f"  yerbasd reports: {first[0]}")
+    raise SystemExit(0)
+
+installed = match.group(1)
+
+try:
+    req = urllib.request.Request(
+        f"https://api.github.com/repos/{repo}/releases/latest",
+        headers={"Accept": "application/vnd.github+json", "User-Agent": "YERB-Pool-Installer"},
+    )
+    with urllib.request.urlopen(req, timeout=15) as response:
+        release = json.load(response)
+except Exception as exc:
+    print(f"WARNING: Could not check GitHub for the latest Yerbas Core release: {exc}")
+    print(f"  Installed Yerbas Core: v{installed}")
+    raise SystemExit(0)
+
+latest_tag = str(release.get("tag_name", "")).strip()
+latest_match = re.search(r"(\d+\.\d+\.\d+(?:\.\d+)?)", latest_tag)
+if not latest_match:
+    print(f"WARNING: Latest GitHub release has an unrecognized tag: {latest_tag or 'unknown'}")
+    print(f"  Installed Yerbas Core: v{installed}")
+    raise SystemExit(0)
+
+latest = latest_match.group(1)
+
+def version_tuple(value):
+    parts = [int(x) for x in value.split(".")]
+    return tuple(parts + [0] * (4 - len(parts)))
+
+iv = version_tuple(installed)
+lv = version_tuple(latest)
+
+print(f"  Installed Yerbas Core: v{installed}")
+print(f"  Latest Yerbas release: v{latest}")
+
+if lv > iv:
+    print(f"NOTICE: Newer Yerbas Core release available: v{latest}")
+    print("        Core was NOT upgraded automatically.")
+elif lv == iv:
+    print("Yerbas Core is current.")
+else:
+    print("Installed Yerbas Core is newer than the latest published release.")
+PY
+}
+
 ensure_core_conf() {
     if [[ -f "$CORE_CONF" ]]; then
         echo "Existing $CORE_CONF detected; preserving it."
@@ -244,6 +318,7 @@ PY
 install_dependencies
 ensure_core_user
 install_latest_core
+check_core_version
 ensure_core_conf
 ensure_service
 wait_for_rpc
