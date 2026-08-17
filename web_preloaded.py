@@ -76,8 +76,7 @@ class PreloadedControlHandler(controls.ControlHandler):
         )
         balance_metric = (
             '<div class="hash-metric"><span>Pool balance / Immature / Total paid</span>'
-            '<strong>${coin(dashboardHashContext.poolBalanceAtomic)} / ${coin(dashboardHashContext.immatureAtomic)} / ${coin(dashboardHashContext.totalPaidAtomic)} YERB</strong>'
-            '<small>mature / immature / lifetime paid</small></div>'
+            '<strong>${coin(dashboardHashContext.poolBalanceAtomic)} / ${coin(dashboardHashContext.immatureAtomic)} / ${coin(dashboardHashContext.totalPaidAtomic)}</strong></div>'
         )
         new_metrics = (
             '<div class="hash-metrics">'
