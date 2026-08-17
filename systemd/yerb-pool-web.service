@@ -5,7 +5,7 @@ After=network.target
 [Service]
 Type=simple
 WorkingDirectory=/opt/yerb-pool
-ExecStart=/usr/bin/python3 /opt/yerb-pool/web_controls.py
+ExecStart=/usr/bin/python3 /opt/yerb-pool/web_preloaded.py
 Restart=always
 RestartSec=3
 User=yerbpool
