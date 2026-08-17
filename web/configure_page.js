@@ -8,6 +8,7 @@
       type:'CPU',
       group:'cpu',
       worker:'cpu',
+      url:'https://github.com/josajosjos/cpuminer-opt-gr',
       command:'cpuminer-opt-gr -a gr -o stratum+tcp://pool.yerbas.org:3333 -u YOUR_YERB_ADDRESS.cpu -p x'
     },
     {
@@ -15,6 +16,7 @@
       type:'CPU',
       group:'cpu',
       worker:'avx2',
+      url:'https://github.com/WyvernTKC-GR/cpu-miner-gr-avx2',
       command:'cpuminer-gr-avx2 -a gr -o stratum+tcp://pool.yerbas.org:3333 -u YOUR_YERB_ADDRESS.avx2 -p x'
     },
     {
@@ -22,6 +24,7 @@
       type:'CPU / GPU',
       group:'gpu',
       worker:'srb',
+      url:'https://github.com/doktor83/SRBMiner-Multi',
       command:'SRBMiner-MULTI --algorithm ghostrider --pool pool.yerbas.org:3333 --wallet YOUR_YERB_ADDRESS.srb --password x'
     },
     {
@@ -29,6 +32,7 @@
       type:'GPU',
       group:'gpu',
       worker:'bz',
+      url:'https://github.com/bzminer/bzminer',
       command:'bzminer -a ghostrider -w YOUR_YERB_ADDRESS.bz -p stratum+tcp://pool.yerbas.org:3333'
     },
     {
@@ -36,6 +40,7 @@
       type:'GPU',
       group:'gpu',
       worker:'wildrig',
+      url:'https://github.com/andru-kun/wildrig-multi',
       command:'wildrig.exe --algo ghostrider --url stratum+tcp://pool.yerbas.org:3333 --user YOUR_YERB_ADDRESS.wildrig --pass x'
     }
   ];
@@ -72,6 +77,11 @@
       .configure-page .command-list{display:grid;gap:10px;margin-top:12px}
       .configure-page .command-card{padding:14px;border:1px solid var(--yerb-border,#294332);border-radius:9px;background:linear-gradient(155deg,#171d18,#141714)}
       .configure-page .command-head{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:8px;flex-wrap:wrap}
+      .configure-page .command-title{display:flex;align-items:center;gap:7px;flex-wrap:wrap}
+      .configure-page .miner-link{color:#e9f7ea;text-decoration:none;font-weight:700}
+      .configure-page .miner-link:hover{color:var(--yerb,#65c466);text-decoration:underline}
+      .configure-page .github-link{font-size:11px;color:#8edb91;text-decoration:none;border:1px solid #35553d;border-radius:999px;padding:3px 7px;background:#162019}
+      .configure-page .github-link:hover{border-color:var(--yerb,#65c466);color:#e2ffe4;text-decoration:none}
       .configure-page .command-type{font-size:11px;color:#91a394;margin-left:5px;font-weight:500}
       .configure-page .command-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:center}
       .configure-page .command-input{width:100%;box-sizing:border-box;font-family:monospace;padding:10px 12px;border-radius:7px;border:1px solid rgba(100,255,140,.25);background:#0b120d;color:inherit}
@@ -118,7 +128,11 @@
     return commands.filter(c=>c.group===group).map(c=>`
       <div class="command-card">
         <div class="command-head">
-          <div><strong>${esc(c.name)}</strong><span class="command-type">${esc(c.type)}</span></div>
+          <div class="command-title">
+            <a class="miner-link" href="${esc(c.url)}" target="_blank" rel="noopener noreferrer">${esc(c.name)}</a>
+            <span class="command-type">${esc(c.type)}</span>
+            <a class="github-link" href="${esc(c.url)}" target="_blank" rel="noopener noreferrer">GitHub ↗</a>
+          </div>
         </div>
         <div class="command-row">
           <input class="command-input" data-template="${esc(c.command)}" type="text" readonly value="${esc(c.command)}" aria-label="${esc(c.name)} command">
