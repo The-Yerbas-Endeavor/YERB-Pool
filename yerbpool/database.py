@@ -4,7 +4,7 @@ import time
 from decimal import Decimal, ROUND_DOWN
 
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 COIN = 100_000_000
 
 
@@ -66,6 +66,12 @@ class PoolDB:
                 FOREIGN KEY(account_id) REFERENCES accounts(id),
                 FOREIGN KEY(worker_id) REFERENCES workers(id)
             );
+            CREATE TABLE IF NOT EXISTS share_buckets_60s (
+                bucket INTEGER PRIMARY KEY,
+                accepted_diff REAL NOT NULL DEFAULT 0,
+                accepted INTEGER NOT NULL DEFAULT 0,
+                rejected INTEGER NOT NULL DEFAULT 0
+            );
             CREATE TABLE IF NOT EXISTS blocks (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 height INTEGER,
@@ -126,11 +132,13 @@ class PoolDB:
             CREATE INDEX IF NOT EXISTS idx_shares_worker ON shares(worker);
             CREATE INDEX IF NOT EXISTS idx_shares_ts ON shares(ts);
             CREATE INDEX IF NOT EXISTS idx_shares_account ON shares(account_id, ts);
+            CREATE INDEX IF NOT EXISTS idx_shares_ts_accepted_diff ON shares(ts, accepted, difficulty);
             CREATE INDEX IF NOT EXISTS idx_blocks_status ON blocks(status, height);
             CREATE INDEX IF NOT EXISTS idx_ledger_account ON ledger(account_id, ts);
             CREATE INDEX IF NOT EXISTS idx_payouts_status ON payouts(status, created_at);
             """)
             self._migrate(db)
+            self._backfill_share_buckets(db)
             db.execute("INSERT OR REPLACE INTO schema_meta(key,value) VALUES('schema_version',?)", (str(SCHEMA_VERSION),))
 
     @staticmethod
@@ -147,6 +155,23 @@ class PoolDB:
         self._ensure_column(db, "blocks", "credited_at", "INTEGER")
         self._ensure_column(db, "blocks", "round_start_share_id", "INTEGER")
         self._ensure_column(db, "blocks", "round_end_share_id", "INTEGER")
+
+    @staticmethod
+    def _backfill_share_buckets(db):
+        marker = db.execute("SELECT value FROM schema_meta WHERE key='share_buckets_60s_backfilled'").fetchone()
+        if marker and marker[0] == "1":
+            return
+        db.execute("DELETE FROM share_buckets_60s")
+        db.execute(
+            """INSERT INTO share_buckets_60s(bucket,accepted_diff,accepted,rejected)
+               SELECT (ts / 60) * 60,
+                      COALESCE(SUM(CASE WHEN accepted=1 THEN difficulty ELSE 0 END),0),
+                      COALESCE(SUM(CASE WHEN accepted=1 THEN 1 ELSE 0 END),0),
+                      COALESCE(SUM(CASE WHEN accepted=0 THEN 1 ELSE 0 END),0)
+               FROM shares
+               GROUP BY (ts / 60) * 60"""
+        )
+        db.execute("INSERT OR REPLACE INTO schema_meta(key,value) VALUES('share_buckets_60s_backfilled','1')")
 
     @staticmethod
     def split_worker(login):
@@ -174,10 +199,22 @@ class PoolDB:
     def add_share(self, worker, job_id, difficulty, accepted, block_candidate=False, hash_hex=None):
         account_id, worker_id = self.get_or_create_worker(worker)
         now = int(time.time())
+        accepted_int = int(bool(accepted))
+        difficulty_value = float(difficulty)
         with self.lock, self._connect() as db:
             cur = db.execute(
                 "INSERT INTO shares(ts,account_id,worker_id,worker,job_id,difficulty,accepted,block_candidate,hash) VALUES(?,?,?,?,?,?,?,?,?)",
-                (now, account_id, worker_id, worker, job_id, float(difficulty), int(bool(accepted)), int(bool(block_candidate)), hash_hex),
+                (now, account_id, worker_id, worker, job_id, difficulty_value, accepted_int, int(bool(block_candidate)), hash_hex),
+            )
+            bucket = (now // 60) * 60
+            db.execute(
+                """INSERT INTO share_buckets_60s(bucket,accepted_diff,accepted,rejected)
+                   VALUES(?,?,?,?)
+                   ON CONFLICT(bucket) DO UPDATE SET
+                     accepted_diff=accepted_diff+excluded.accepted_diff,
+                     accepted=accepted+excluded.accepted,
+                     rejected=rejected+excluded.rejected""",
+                (bucket, difficulty_value if accepted_int else 0.0, accepted_int, 0 if accepted_int else 1),
             )
             counter = "accepted_shares" if accepted else "rejected_shares"
             db.execute(f"UPDATE workers SET {counter}={counter}+1,last_seen_at=? WHERE id=?", (now, worker_id))
