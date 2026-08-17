@@ -37,8 +37,6 @@ def _closed_db():
 
 base.db = _closed_db
 
-# Keep references to the original rich API responses; the live wrappers below
-# only replace their current hashrate fields with the canonical rolling value.
 _base_api_worker_stats = base.api_worker_stats
 _base_api_account = base.api_account
 
@@ -62,6 +60,23 @@ def _wallet_balance_atomic():
         value = base.rpc_call("getbalance")
         if value is not None:
             return int(round(float(value) * COIN))
+    except Exception:
+        pass
+    return None
+
+
+def _network_hashrate():
+    """Return Yerbas Core's authoritative network hashrate estimate."""
+    try:
+        info = base.rpc_call("getmininginfo")
+        if isinstance(info, dict) and info.get("networkhashps") is not None:
+            return float(info["networkhashps"])
+    except Exception:
+        pass
+    try:
+        value = base.rpc_call("getnetworkhashps")
+        if value is not None:
+            return float(value)
     except Exception:
         pass
     return None
@@ -214,9 +229,6 @@ def api_pool_history(hours=24, bucket_seconds=300):
     start = end - hours * 3600
     cache_key = (hours, bucket_seconds, end)
 
-    # A history bucket cannot change after its end boundary moves forward, so
-    # cache each completed window. This makes refreshes and range switching
-    # effectively instant instead of repeatedly aggregating the shares table.
     with _POOL_HISTORY_CACHE_LOCK:
         cached = _POOL_HISTORY_CACHE.get(cache_key)
     if cached is not None:
@@ -298,6 +310,7 @@ def api_luck():
         network_diff = base.current_network_difficulty()
     except Exception:
         network_diff = None
+    network_hashrate = _network_hashrate()
 
     round_diff = float(round_stats.get("accepted_diff") or 0)
     effort_ratio = 0.0
@@ -322,6 +335,7 @@ def api_luck():
         "pool_hashrate": pool_hashrate,
         "hashrate_window_seconds": HASHRATE_WINDOW,
         "network_difficulty": network_diff,
+        "network_hashrate": network_hashrate,
         "eta_seconds": eta_seconds,
         "round_start": round_start,
         "round_seconds": max(0, now - round_start),
@@ -362,7 +376,6 @@ def api_shares(status=None, address=None, limit=250):
         return base.rows(con, sql, params)
 
 
-# Override the route functions used by web.py's Handler.
 base.api_summary = api_summary
 base.api_workers = api_workers
 base.api_worker_stats = api_worker_stats
@@ -395,17 +408,8 @@ class LiveHandler(base.Handler):
                 "['Address','Workers','Accepted','Rejected','Balance','Immature','Total Paid']",
                 "['Address','Workers','Accepted','Rejected','Mature Balance','Immature Balance','Total Paid']",
             )
-            text = text.replace(
-                '<div class="muted">Immature</div>',
-                '<div class="muted">Immature Balance</div>',
-            )
-            text = text.replace(
-                '<div class="muted">Balance</div>',
-                '<div class="muted">Mature Balance</div>',
-            )
-            # The combined graph owns historical data. The base dashboard no
-            # longer blocks first paint by running its own duplicate history
-            # query before it can render the page.
+            text = text.replace('<div class="muted">Immature</div>', '<div class="muted">Immature Balance</div>')
+            text = text.replace('<div class="muted">Balance</div>', '<div class="muted">Mature Balance</div>')
             text = text.replace(
                 "const active=w.filter(x=>x.active).slice(0,24);const stats=(await Promise.all(active.map(x=>get('/api/worker/'+x.id+'/stats?hours=24&bucket=300').catch(()=>null)))).filter(Boolean);const h=aggregateHistory(stats);",
                 "const h=[];",
@@ -414,12 +418,7 @@ class LiveHandler(base.Handler):
                 "const cards=[['Miners',s.accounts.accounts,'/miners'],['Active Workers',s.workers.active_workers,'/workers'],",
                 "const cards=[['Miners / Active',`${s.accounts.accounts} / ${s.workers.active_workers}`,'/miners'],",
             )
-            # Blocks / Pending now lives in the Pool Activity strip, so remove
-            # the duplicate dashboard card entirely.
-            text = text.replace(
-                "['Blocks Found',s.blocks.blocks,'/blocks'],['Pending Blocks',s.blocks.pending,'/blocks/pending'],",
-                "",
-            )
+            text = text.replace("['Blocks Found',s.blocks.blocks,'/blocks'],['Pending Blocks',s.blocks.pending,'/blocks/pending'],", "")
             text = text.replace(
                 '<div class="metric"><span class="muted small">Rejected shares / 24h</span><strong>${rejected24.toLocaleString()}</strong></div>',
                 '<a class="metric" href="/miners" style="display:block;color:inherit;text-decoration:none"><span class="muted small">Miners / Active</span><strong>${s.accounts.accounts} / ${s.workers.active_workers}</strong></a>',
@@ -428,57 +427,28 @@ class LiveHandler(base.Handler):
                 '<div class="metric"><span class="muted small">24h peak hashrate</span><strong>${hashRate(peak)}</strong></div>',
                 '<a class="metric" href="/blocks" style="display:block;color:inherit;text-decoration:none"><span class="muted small">Blocks / Pending</span><strong>${s.blocks.blocks} / ${s.blocks.pending}</strong></a>',
             )
-
-            # The dashboard must physically render one chart card only. The
-            # enhanced chart script owns this card and draws pool + network
-            # hashrate together; Share Activity is not emitted on the dashboard.
             old_dashboard_charts = '<div class="chart-grid" style="margin-top:16px"><div class="chart-card"><h3>Pool Hashrate</h3><div class="muted small">24-hour estimated hashrate in 5-minute buckets.</div>${h.length?lineChart(h,\'hashrate\',hashRate):\'<div class="empty">Waiting for enough accepted-share history.</div>\'}<div class="legend"><span><i class="dot hashdot"></i>Pool hashrate</span></div></div><div class="chart-card"><h3>Share Activity</h3><div class="muted small">Accepted and rejected shares in 5-minute buckets.</div>${h.length?shareChart(h):\'<div class="empty">Waiting for share history.</div>\'}<div class="legend"><span><i class="dot okdot"></i>Accepted</span><span><i class="dot baddot"></i>Rejected</span></div></div></div>'
             new_dashboard_chart = '<div class="chart-grid" style="margin-top:16px;grid-template-columns:1fr"><div class="chart-card"><h3>Pool Hashrate</h3><div class="muted small">Loading pool and network hashrate…</div><div class="empty" style="margin-top:12px">Loading chart…</div></div></div>'
             text = text.replace(old_dashboard_charts, new_dashboard_chart)
-
-            # Worker/account detail pages must use canonical API values rather
-            # than averaging the latest graph buckets.
             old_latest = "latest=h.slice(-2).reduce((s,v)=>s+Number(v.hashrate||0),0)/Math.max(1,Math.min(2,h.length))"
-            text = text.replace(
-                old_latest,
-                "latest=Number(x.hashrate||x.combined_hashrate||0)",
-            )
+            text = text.replace(old_latest, "latest=Number(x.hashrate||x.combined_hashrate||0)")
             text = text.replace(
                 "Accepted GhostRider share work from currently tracked workers.",
                 "Pool-wide GhostRider share work recorded during the last 24 hours.",
             )
-
-            # Keep all detail and dashboard DOM stable. Live values are updated
-            # by targeted scripts rather than rebuilding whole page sections.
-            text = text.replace(
-                "if(location.pathname==='/')setInterval(dashboard,10000);",
-                "",
-            )
-            text = text.replace(
-                "if(location.pathname.startsWith('/worker/'))setInterval(worker,30000);",
-                "",
-            )
-            text = text.replace(
-                "if(location.pathname.startsWith('/account/'))setInterval(account,30000);",
-                "",
-            )
-            text = text.replace(
-                "</head>",
-                '<link rel="stylesheet" href="/brand.css?v=1"></head>',
-            )
+            text = text.replace("if(location.pathname==='/')setInterval(dashboard,10000);", "")
+            text = text.replace("if(location.pathname.startsWith('/worker/'))setInterval(worker,30000);", "")
+            text = text.replace("if(location.pathname.startsWith('/account/'))setInterval(account,30000);", "")
+            text = text.replace("</head>", '<link rel="stylesheet" href="/brand.css?v=1"></head>')
             body = text.replace(
                 "</body>",
-                base.LUCK_SCRIPT
-                + '<script src="/reward_labels.js?v=6"></script></body>',
+                base.LUCK_SCRIPT + '<script src="/reward_labels.js?v=6"></script></body>',
             ).encode()
         else:
             body = target.read_bytes()
 
         self.send_response(200)
-        self.send_header(
-            "Content-Type",
-            mimetypes.guess_type(target.name)[0] or "application/octet-stream",
-        )
+        self.send_header("Content-Type", mimetypes.guess_type(target.name)[0] or "application/octet-stream")
         self.send_header("Cache-Control", "no-store")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
@@ -486,8 +456,5 @@ class LiveHandler(base.Handler):
 
 
 if __name__ == "__main__":
-    print(
-        f"YERB Pool web listening on http://{base.HOST}:{base.PORT} "
-        "(standardized live metrics)"
-    )
+    print(f"YERB Pool web listening on http://{base.HOST}:{base.PORT} (standardized live metrics)")
     ThreadingHTTPServer((base.HOST, base.PORT), LiveHandler).serve_forever()
