@@ -1,11 +1,5 @@
 #!/usr/bin/env python3
-"""Production web entry point for the YERB Pool dashboard.
-
-The combined network/pool hashrate chart lives directly in web/index.html.
-This wrapper applies production labels/branding and additive live widgets only.
-Legacy chart injectors are explicitly filtered so they cannot replace the native
-chart after the page has loaded.
-"""
+"""Production web entry point for the YERB Pool dashboard."""
 
 import mimetypes
 import re
@@ -23,27 +17,20 @@ class PreloadedControlHandler(controls.ControlHandler):
             return super().serve_file(target)
 
         text = target.read_text()
+
+        # Production labels.
         text = text.replace(
             "['Address','Workers','Accepted','Rejected','Balance','Immature','Total Paid']",
             "['Address','Workers','Accepted','Rejected','Mature Balance','Immature Balance','Total Paid']",
         )
-        text = text.replace(
-            '<div class="muted">Immature</div>',
-            '<div class="muted">Immature Balance</div>',
-        )
-        text = text.replace(
-            '<div class="muted">Balance</div>',
-            '<div class="muted">Mature Balance</div>',
-        )
+        text = text.replace('<div class="muted">Immature</div>', '<div class="muted">Immature Balance</div>')
+        text = text.replace('<div class="muted">Balance</div>', '<div class="muted">Mature Balance</div>')
         text = text.replace(
             "latest=h.slice(-2).reduce((s,v)=>s+Number(v.hashrate||0),0)/Math.max(1,Math.min(2,h.length))",
             "latest=Number(x.hashrate||x.combined_hashrate||0)",
         )
 
-        # Give the native combined chart access to the non-hash dashboard
-        # values that belong in its metric row. The context survives range
-        # changes because only the chart data is re-fetched when a range button
-        # is clicked.
+        # Dashboard-only context used by the native combined chart metric row.
         text = text.replace(
             "let selectedHashRange='24H';",
             "let selectedHashRange='24H';\n"
@@ -58,25 +45,17 @@ class PreloadedControlHandler(controls.ControlHandler):
             1,
         )
 
-        # Worker mode must never reuse the dashboard's persisted network hash
-        # samples. Render a dedicated worker SVG with worker hashrate plus
-        # accepted/rejected share bars while keeping the dashboard chart intact.
+        # Worker mode: use the dashboard visual language, but never reuse the
+        # dashboard's persisted network samples. Instead draw worker hashrate
+        # with accepted/rejected share activity in the same full-width panel.
         worker_chart_js = r'''function workerChartSvg(history){const W=1120,H=340,L=72,R=24,T=22,B=46,iw=W-L-R,ih=H-T-B,rows=Array.isArray(history)?history:[];if(!rows.length)return'<div class="empty">No worker history recorded yet.</div>';const pmax=Math.max(...rows.map(x=>Number(x.hashrate||0)),1)*1.12,smax=Math.max(...rows.map(x=>Number(x.accepted||0)+Number(x.rejected||0)),1),min=Number(rows[0].ts||0),max=Number(rows[rows.length-1].ts||min+1),px=ts=>L+(Number(ts)-min)/Math.max(1,max-min)*iw,py=v=>T+ih-Number(v||0)/pmax*ih,pts=rows.map(x=>`${px(x.ts).toFixed(1)},${py(x.hashrate).toFixed(1)}`).join(' '),area=`${L},${T+ih} ${pts} ${W-R},${T+ih}`;let grid='',bars='',labels='';for(let i=0;i<=4;i++){const y=T+ih*i/4;grid+=`<line class="gridline" x1="${L}" y1="${y}" x2="${W-R}" y2="${y}"/><text class="axis pool-axis" x="4" y="${y+4}">${esc(hashRate(pmax*(1-i/4)))}</text>`}const bw=Math.max(2,Math.min(12,iw/Math.max(rows.length,1)*.58)),base=T+ih;for(const x of rows){const a=Number(x.accepted||0)/smax*ih*.24,r=Number(x.rejected||0)/smax*ih*.24,x0=px(x.ts)-bw/2;bars+=`<rect class="share-accepted" x="${x0.toFixed(1)}" y="${(base-a).toFixed(1)}" width="${bw.toFixed(1)}" height="${a.toFixed(1)}"/><rect class="share-rejected" x="${x0.toFixed(1)}" y="${(base-a-r).toFixed(1)}" width="${bw.toFixed(1)}" height="${r.toFixed(1)}"/>`}const count=selectedHashRange==='7D'?7:6;for(let i=0;i<count;i++){const ts=min+(max-min)*i/Math.max(1,count-1),x=px(ts),d=new Date(ts*1000),label=selectedHashRange==='7D'?d.toLocaleDateString([],{month:'short',day:'numeric'}):d.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});labels+=`<text class="axis" text-anchor="${i===0?'start':i===count-1?'end':'middle'}" x="${x}" y="${H-10}">${esc(label)}</text>`}return `<div class="combined-chart-wrap"><svg class="combined-hash-chart worker-only-chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">${grid}<polygon class="pool-area" points="${area}"/>${bars}<polyline class="pool-line" points="${pts}"/>${labels}<line class="hash-crosshair" x1="0" x2="0" y1="${T}" y2="${T+ih}"/></svg><div class="combined-hash-tooltip" hidden></div></div>`}'''
-        text = text.replace(
-            "function combinedHashChart(data,opts={}){",
-            worker_chart_js + "\nfunction combinedHashChart(data,opts={}){",
-            1,
-        )
+        text = text.replace("function combinedHashChart(data,opts={}){", worker_chart_js + "\nfunction combinedHashChart(data,opts={}){", 1)
         text = text.replace(
             "poolNow=Number(data?.pool_hashrate||0),samples=networkSamples(networkNow),r=",
             "poolNow=Number(data?.pool_hashrate||0),workerMode=!!opts.workerMode,samples=workerMode?[]:networkSamples(networkNow),r=",
             1,
         )
-        text = text.replace(
-            ",workerMode=!!opts.workerMode,accepted=",
-            ",accepted=",
-            1,
-        )
+        text = text.replace(",workerMode=!!opts.workerMode,accepted=", ",accepted=", 1)
         text = text.replace(
             "${hashChartSvg(history,rangeSamples,networkNow)}",
             "${workerMode?workerChartSvg(history):hashChartSvg(history,rangeSamples,networkNow)}",
@@ -101,10 +80,7 @@ class PreloadedControlHandler(controls.ControlHandler):
             "Worker hashrate with the same chart layout used on the dashboard.",
             "Worker hashrate and share activity over the selected time range.",
         )
-        text = text.replace(
-            "Worker hashrate over selected range",
-            "Worker hashrate and share activity over selected range",
-        )
+        text = text.replace("Worker hashrate over selected range", "Worker hashrate and share activity over selected range")
         text = text.replace(
             "</style>",
             "#worker-hash-card .hash-metrics{grid-template-columns:repeat(4,minmax(130px,1fr))}"
@@ -116,10 +92,7 @@ class PreloadedControlHandler(controls.ControlHandler):
             1,
         )
 
-        # Keep six useful metric cards inside Network Hash vs Pool Hash:
-        # Pool now, Network now, Pool share, Pool balance / Immature / Total paid,
-        # Miners, and Estimated block time. Explicitly remove any legacy
-        # Peak pool / Peak network cards if they are present in the template.
+        # Six dashboard metrics inside Network Hash vs Pool Hash.
         text = text.replace(
             ".hash-metrics{display:grid;grid-template-columns:repeat(3,minmax(130px,1fr));",
             ".hash-metrics{display:grid;grid-template-columns:repeat(6,minmax(130px,1fr));",
@@ -147,12 +120,7 @@ class PreloadedControlHandler(controls.ControlHandler):
             '</div>'
         )
         text = text.replace(old_metrics, new_metrics, 1)
-        text = re.sub(
-            r'<div class="hash-metric"><span>Peak pool</span>.*?</div>',
-            balance_metric,
-            text,
-            count=1,
-        )
+        text = re.sub(r'<div class="hash-metric"><span>Peak pool</span>.*?</div>', balance_metric, text, count=1)
         text = re.sub(
             r'<div class="hash-metric"><span>Peak network</span>.*?</div>',
             '<div class="hash-metric"><span>Miners</span><strong>${Number(dashboardHashContext.miners||0).toLocaleString()}</strong><small>tracked payout addresses</small></div><div class="hash-metric"><span>Estimated block time</span><strong>${fmtTime(dashboardHashContext.etaSeconds)}</strong><small>at current pool hashrate</small></div>',
@@ -160,21 +128,13 @@ class PreloadedControlHandler(controls.ControlHandler):
             count=1,
         )
 
-        # The native dashboard owns its combined chart and the old dashboard
-        # metric strip has been removed from web/index.html. Never allow a
-        # recurring full-dashboard redraw to destroy/recreate the chart.
+        # Never let recurring full-page redraws recreate the native charts.
         text = text.replace("if(location.pathname==='/')setInterval(dashboard,10000);", "")
         text = text.replace("if(location.pathname.startsWith('/worker/'))setInterval(worker,30000);", "")
         text = text.replace("if(location.pathname.startsWith('/account/'))setInterval(account,30000);", "")
-        text = text.replace(
-            "</head>",
-            '<link rel="stylesheet" href="/brand.css?v=1"></head>',
-        )
+        text = text.replace("</head>", '<link rel="stylesheet" href="/brand.css?v=1"></head>')
 
-        # LUCK_SCRIPT is assembled additively through several imported web
-        # layers. Older releases appended standalone chart renderers there.
-        # Filter them at the final production boundary so an old renderer can
-        # never wake up later and replace the native chart.
+        # Filter legacy injected chart implementations at the production edge.
         luck_script = base.LUCK_SCRIPT
         luck_script = re.sub(
             r'<script[^>]+src=["\'][^"\']*(?:network_hash_chart|hashrate_chart_fast|hashrate_preload_bridge)\.js[^"\']*["\'][^>]*></script>',
@@ -182,24 +142,15 @@ class PreloadedControlHandler(controls.ControlHandler):
             luck_script,
             flags=re.IGNORECASE,
         )
-        luck_script = re.sub(
-            r'setInterval\s*\(\s*renderLuck\s*,\s*10000\s*\)\s*;?',
-            '',
-            luck_script,
-        )
-        luck_script = luck_script.replace(
-            "setTimeout(renderLuck,800); setInterval(renderLuck,10000);",
-            "setTimeout(renderLuck,800);",
-        )
+        luck_script = re.sub(r'setInterval\s*\(\s*renderLuck\s*,\s*10000\s*\)\s*;?', '', luck_script)
+        luck_script = luck_script.replace("setTimeout(renderLuck,800); setInterval(renderLuck,10000);", "setTimeout(renderLuck,800);")
 
         body_text = text.replace(
             "</body>",
-            luck_script + '<script src="/reward_labels.js?v=7"></script></body>',
+            luck_script
+            + '<script src="/reward_labels.js?v=7"></script>'
+            + '<script src="/account_performance.js?v=1"></script></body>',
         )
-
-        # Defense in depth: strip any legacy chart-loader tag that may already
-        # exist in the source template itself. The only chart implementation on
-        # the home page must be the one embedded in web/index.html.
         body_text = re.sub(
             r'<script[^>]+src=["\'][^"\']*(?:network_hash_chart|hashrate_chart_fast|hashrate_preload_bridge)\.js[^"\']*["\'][^>]*></script>',
             '',
@@ -209,10 +160,7 @@ class PreloadedControlHandler(controls.ControlHandler):
         body = body_text.encode()
 
         self.send_response(200)
-        self.send_header(
-            "Content-Type",
-            mimetypes.guess_type(target.name)[0] or "application/octet-stream",
-        )
+        self.send_header("Content-Type", mimetypes.guess_type(target.name)[0] or "application/octet-stream")
         self.send_header("Cache-Control", "no-store")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
@@ -224,6 +172,6 @@ if __name__ == "__main__":
     controls._ensure_chart_index()
     print(
         f"YERB Pool web/admin listening on http://{base.HOST}:{base.PORT} "
-        "(native dashboard chart enabled; legacy chart loaders filtered)"
+        "(native dashboard/worker/account charts enabled; legacy chart loaders filtered)"
     )
     ThreadingHTTPServer((base.HOST, base.PORT), PreloadedControlHandler).serve_forever()
