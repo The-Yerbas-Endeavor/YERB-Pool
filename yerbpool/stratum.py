@@ -136,7 +136,6 @@ class MinerSession:
             "" if avg is None else f" avg_share={avg:.2f}s target={self.pool.vardiff_target:.2f}s",
         )
         await self.send_difficulty()
-        await self.send_job(self.pool.jobs.snapshot(), True)
         return True
 
     async def maybe_retarget(self):
