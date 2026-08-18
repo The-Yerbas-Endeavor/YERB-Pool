@@ -92,6 +92,7 @@ class MinerSession:
         self.last_accepted_at = None
         self.last_retarget_at = now
         self.share_intervals = []
+        self.vardiff_task = None
 
     async def send(self, obj):
         self.writer.write((json.dumps(obj, separators=(",", ":")) + "\n").encode())
@@ -122,6 +123,22 @@ class MinerSession:
         await self.send({"id": None, "method": "mining.set_difficulty",
                          "params": [self.difficulty]})
 
+    async def set_difficulty(self, desired, reason, avg=None):
+        desired = min(max(float(desired), self.pool.vardiff_min), self.pool.vardiff_max)
+        desired = float(f"{desired:.12g}")
+        if abs(desired - self.difficulty) <= max(1e-12, self.difficulty * 0.01):
+            return False
+        old = self.difficulty
+        self.difficulty = desired
+        logging.info(
+            "VarDiff worker=%s %.8g -> %.8g reason=%s%s",
+            self.worker or "?", old, self.difficulty, reason,
+            "" if avg is None else f" avg_share={avg:.2f}s target={self.pool.vardiff_target:.2f}s",
+        )
+        await self.send_difficulty()
+        await self.send_job(self.pool.jobs.snapshot(), True)
+        return True
+
     async def maybe_retarget(self):
         if not self.pool.vardiff_enabled:
             return
@@ -150,36 +167,60 @@ class MinerSession:
         lo = self.difficulty / self.pool.vardiff_max_step
         hi = self.difficulty * self.pool.vardiff_max_step
         desired = min(max(desired, lo), hi)
-        desired = min(max(desired, self.pool.vardiff_min), self.pool.vardiff_max)
-        desired = float(f"{desired:.12g}")
 
         self.last_retarget_at = now
         self.share_intervals.clear()
-        if abs(desired - self.difficulty) <= max(1e-12, self.difficulty * 0.01):
-            return
+        await self.set_difficulty(desired, "share-rate", avg)
 
-        old = self.difficulty
-        self.difficulty = desired
-        logging.info(
-            "VarDiff worker=%s %.8g -> %.8g avg_share=%.2fs target=%.2fs",
-            self.worker or "?", old, self.difficulty, avg, self.pool.vardiff_target,
-        )
-        await self.send_difficulty()
-        await self.send_job(self.pool.jobs.snapshot(), True)
+    async def vardiff_idle_loop(self):
+        try:
+            while not self.reader.at_eof():
+                await asyncio.sleep(self.pool.vardiff_retarget)
+                if not self.pool.vardiff_enabled or not self.authorized or not self.subscribed:
+                    continue
+                now = time.monotonic()
+                reference = self.last_accepted_at if self.last_accepted_at is not None else self.last_retarget_at
+                if now - reference < self.pool.vardiff_retarget:
+                    continue
+                if self.difficulty <= self.pool.vardiff_min:
+                    self.last_retarget_at = now
+                    continue
+                desired = max(self.pool.vardiff_min, self.difficulty / self.pool.vardiff_max_step)
+                changed = await self.set_difficulty(desired, "idle-no-accepted-shares")
+                self.last_retarget_at = now
+                self.share_intervals.clear()
+                if changed:
+                    self.last_accepted_at = None
+        except asyncio.CancelledError:
+            pass
+        except (ConnectionResetError, BrokenPipeError):
+            pass
+        except Exception:
+            logging.exception("VarDiff idle loop failed worker=%s", self.worker or "?")
 
     async def run(self):
-        while not self.reader.at_eof():
-            req = None
-            line = await self.reader.readline()
-            if not line:
-                break
-            try:
-                req = json.loads(line.decode())
-                await self.handle(req)
-            except Exception as exc:
-                logging.exception("Stratum request failed")
-                await self.send({"id": req.get("id") if isinstance(req, dict) else None,
-                                 "result": None, "error": [20, str(exc), None]})
+        if self.pool.vardiff_enabled:
+            self.vardiff_task = asyncio.create_task(self.vardiff_idle_loop())
+        try:
+            while not self.reader.at_eof():
+                req = None
+                line = await self.reader.readline()
+                if not line:
+                    break
+                try:
+                    req = json.loads(line.decode())
+                    await self.handle(req)
+                except Exception as exc:
+                    logging.exception("Stratum request failed")
+                    await self.send({"id": req.get("id") if isinstance(req, dict) else None,
+                                     "result": None, "error": [20, str(exc), None]})
+        finally:
+            if self.vardiff_task is not None:
+                self.vardiff_task.cancel()
+                try:
+                    await self.vardiff_task
+                except asyncio.CancelledError:
+                    pass
 
     async def handle(self, req):
         method = req.get("method")
