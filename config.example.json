@@ -10,7 +10,7 @@
     "difficulty": 0.05,
     "vardiff": {
       "enabled": true,
-      "min_difficulty": 0.05,
+      "min_difficulty": 0.001,
       "max_difficulty": 65536.0,
       "target_share_seconds": 12,
       "retarget_seconds": 60,
