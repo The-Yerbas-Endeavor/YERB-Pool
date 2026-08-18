@@ -88,6 +88,7 @@ class MinerSession:
         self.extranonce1 = os.urandom(4).hex()
         self.seen = set()
         self.difficulty = min(max(pool.difficulty, pool.vardiff_min), pool.vardiff_max)
+        self.job_difficulties = {}
         now = time.monotonic()
         self.last_accepted_at = None
         self.last_retarget_at = now
@@ -261,6 +262,9 @@ class MinerSession:
     async def send_job(self, job, clean):
         if not job or not self.subscribed:
             return
+        self.job_difficulties[job["id"]] = self.difficulty
+        while len(self.job_difficulties) > 64:
+            self.job_difficulties.pop(next(iter(self.job_difficulties)))
         tpl = job["template"]
         coinb1, coinb2 = coinbase_parts(
             tpl, self.pool.pool_address, len(bytes.fromhex(self.extranonce1)),
@@ -345,7 +349,7 @@ class MinerSession:
         pow_hash = await asyncio.to_thread(hash_header, header)
         hash_value = int.from_bytes(pow_hash, "little")
 
-        share_diff = self.difficulty
+        share_diff = self.job_difficulties.get(job_id, self.difficulty)
         s_target = share_target(share_diff)
         target_hex = tpl.get("target")
         network_target = int(target_hex, 16) if isinstance(target_hex, str) and target_hex else compact_target(tpl["bits"])
