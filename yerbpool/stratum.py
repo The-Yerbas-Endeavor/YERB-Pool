@@ -45,7 +45,6 @@ class StratumServer:
         self.vardiff_variance = max(0.0, min(0.95, float(vardiff.get("variance_percent", 30)) / 100.0))
         self.vardiff_max_step = max(1.1, float(vardiff.get("max_step_factor", 2.0)))
         self.pool_address = cfg["pool_address"]
-        self.worker_difficulties = {}
 
     async def serve(self):
         host = self.cfg["stratum"].get("host", "0.0.0.0")
@@ -132,8 +131,6 @@ class MinerSession:
             return False
         old = self.difficulty
         self.difficulty = desired
-        if self.worker:
-            self.pool.worker_difficulties[self.worker] = self.difficulty
         logging.info(
             "VarDiff worker=%s %.8g -> %.8g reason=%s%s",
             self.worker or "?", old, self.difficulty, reason,
@@ -238,9 +235,8 @@ class MinerSession:
                            self.extranonce1, self.extranonce2_size],
                 "error": None,
             })
-            if self.authorized:
-                await self.send_difficulty()
-                await self.send_job(self.pool.jobs.snapshot(), True)
+            await self.send_difficulty()
+            await self.send_job(self.pool.jobs.snapshot(), True)
             return
 
         if method == "mining.authorize":
@@ -248,20 +244,7 @@ class MinerSession:
             self.authorized = bool(self.worker and self.worker.split(".")[0])
             if self.authorized:
                 self.pool.db.get_or_create_worker(self.worker)
-                saved = self.pool.worker_difficulties.get(self.worker)
-                if saved is not None:
-                    self.difficulty = min(max(float(saved), self.pool.vardiff_min),
-                                          self.pool.vardiff_max)
-                    logging.info(
-                        "Restored VarDiff worker=%s difficulty=%.8g",
-                        self.worker, self.difficulty,
-                    )
-                else:
-                    self.pool.worker_difficulties[self.worker] = self.difficulty
             await self.send({"id": rid, "result": self.authorized, "error": None})
-            if self.authorized and self.subscribed:
-                await self.send_difficulty()
-                await self.send_job(self.pool.jobs.snapshot(), True)
             return
 
         if method == "mining.extranonce.subscribe":
