@@ -157,7 +157,8 @@ class PreloadedControlHandler(controls.ControlHandler):
         body_text = text.replace(
             "</body>",
             luck_script
-            + '<script src="/reward_labels.js?v=7"></script></body>',
+            + '<script src="/reward_labels.js?v=7"></script>'
+            + '<script src="/block_badges.js?v=1"></script></body>',
         )
         body_text = re.sub(
             r'<script[^>]+src=["\'][^"\']*(?:network_hash_chart|hashrate_chart_fast|hashrate_preload_bridge)\.js[^"\']*["\'][^>]*></script>',
