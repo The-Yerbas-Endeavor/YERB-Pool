@@ -94,11 +94,12 @@
     const accountHeading=[...document.querySelectorAll('h2')].find(h=>h.textContent.trim()==='Miner Account');
     const section=accountHeading?.closest('section');
     const grid=section?.querySelector('.grid');
-    if(!grid) return;
+    if(!grid) return false;
     [...grid.querySelectorAll('.card')].forEach(card=>{
       const label=card.querySelector('.muted')?.textContent?.trim();
       if(label==='Combined Hashrate') card.remove();
     });
+    return true;
   }
 
   function replaceLegacyCharts(){
@@ -109,10 +110,24 @@
     return document.getElementById('account-hash-card');
   }
 
+  async function waitForAccountDom(maxAttempts=80){
+    for(let i=0;i<maxAttempts;i++){
+      const heading=[...document.querySelectorAll('h2')].find(h=>h.textContent.trim().startsWith('Worker Statistics'));
+      const accountHeading=[...document.querySelectorAll('h2')].find(h=>h.textContent.trim()==='Miner Account');
+      if(heading&&accountHeading) return true;
+      await new Promise(resolve=>setTimeout(resolve,100));
+    }
+    return false;
+  }
+
   async function init(){
     accountInfo=await get('/api/account/'+encodeURIComponent(address)).catch(()=>null);
     if(!accountInfo) return;
     workerIds=(accountInfo.workers||[]).map(w=>w.id).filter(v=>v!==undefined&&v!==null);
+
+    const ready=await waitForAccountDom();
+    if(!ready) return;
+
     cleanTopCards();
     const card=replaceLegacyCharts();
     if(!card) return;
