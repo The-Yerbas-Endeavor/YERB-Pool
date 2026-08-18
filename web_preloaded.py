@@ -128,6 +128,15 @@ class PreloadedControlHandler(controls.ControlHandler):
             count=1,
         )
 
+        # Load the native account renderer after all shared helpers are defined
+        # but before route() executes. This eliminates the delayed legacy chart
+        # render/replacement cycle on /account pages.
+        text = text.replace(
+            "route();\n</script>",
+            "</script><script src=\"/account_native.js?v=1\"></script><script>route();\n</script>",
+            1,
+        )
+
         # Never let recurring full-page redraws recreate the native charts.
         text = text.replace("if(location.pathname==='/')setInterval(dashboard,10000);", "")
         text = text.replace("if(location.pathname.startsWith('/worker/'))setInterval(worker,30000);", "")
@@ -148,8 +157,7 @@ class PreloadedControlHandler(controls.ControlHandler):
         body_text = text.replace(
             "</body>",
             luck_script
-            + '<script src="/reward_labels.js?v=7"></script>'
-            + '<script src="/account_performance.js?v=2"></script></body>',
+            + '<script src="/reward_labels.js?v=7"></script></body>',
         )
         body_text = re.sub(
             r'<script[^>]+src=["\'][^"\']*(?:network_hash_chart|hashrate_chart_fast|hashrate_preload_bridge)\.js[^"\']*["\'][^>]*></script>',
