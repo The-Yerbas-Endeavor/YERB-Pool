@@ -58,6 +58,64 @@ class PreloadedControlHandler(controls.ControlHandler):
             1,
         )
 
+        # Worker mode must never reuse the dashboard's persisted network hash
+        # samples. Render a dedicated worker SVG with worker hashrate plus
+        # accepted/rejected share bars while keeping the dashboard chart intact.
+        worker_chart_js = r'''function workerChartSvg(history){const W=1120,H=340,L=72,R=24,T=22,B=46,iw=W-L-R,ih=H-T-B,rows=Array.isArray(history)?history:[];if(!rows.length)return'<div class="empty">No worker history recorded yet.</div>';const pmax=Math.max(...rows.map(x=>Number(x.hashrate||0)),1)*1.12,smax=Math.max(...rows.map(x=>Number(x.accepted||0)+Number(x.rejected||0)),1),min=Number(rows[0].ts||0),max=Number(rows[rows.length-1].ts||min+1),px=ts=>L+(Number(ts)-min)/Math.max(1,max-min)*iw,py=v=>T+ih-Number(v||0)/pmax*ih,pts=rows.map(x=>`${px(x.ts).toFixed(1)},${py(x.hashrate).toFixed(1)}`).join(' '),area=`${L},${T+ih} ${pts} ${W-R},${T+ih}`;let grid='',bars='',labels='';for(let i=0;i<=4;i++){const y=T+ih*i/4;grid+=`<line class="gridline" x1="${L}" y1="${y}" x2="${W-R}" y2="${y}"/><text class="axis pool-axis" x="4" y="${y+4}">${esc(hashRate(pmax*(1-i/4)))}</text>`}const bw=Math.max(2,Math.min(12,iw/Math.max(rows.length,1)*.58)),base=T+ih;for(const x of rows){const a=Number(x.accepted||0)/smax*ih*.24,r=Number(x.rejected||0)/smax*ih*.24,x0=px(x.ts)-bw/2;bars+=`<rect class="share-accepted" x="${x0.toFixed(1)}" y="${(base-a).toFixed(1)}" width="${bw.toFixed(1)}" height="${a.toFixed(1)}"/><rect class="share-rejected" x="${x0.toFixed(1)}" y="${(base-a-r).toFixed(1)}" width="${bw.toFixed(1)}" height="${r.toFixed(1)}"/>`}const count=selectedHashRange==='7D'?7:6;for(let i=0;i<count;i++){const ts=min+(max-min)*i/Math.max(1,count-1),x=px(ts),d=new Date(ts*1000),label=selectedHashRange==='7D'?d.toLocaleDateString([],{month:'short',day:'numeric'}):d.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});labels+=`<text class="axis" text-anchor="${i===0?'start':i===count-1?'end':'middle'}" x="${x}" y="${H-10}">${esc(label)}</text>`}return `<div class="combined-chart-wrap"><svg class="combined-hash-chart worker-only-chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">${grid}<polygon class="pool-area" points="${area}"/>${bars}<polyline class="pool-line" points="${pts}"/>${labels}<line class="hash-crosshair" x1="0" x2="0" y1="${T}" y2="${T+ih}"/></svg><div class="combined-hash-tooltip" hidden></div></div>`}'''
+        text = text.replace(
+            "function combinedHashChart(data,opts={}){",
+            worker_chart_js + "\nfunction combinedHashChart(data,opts={}){",
+            1,
+        )
+        text = text.replace(
+            "poolNow=Number(data?.pool_hashrate||0),samples=networkSamples(networkNow),r=",
+            "poolNow=Number(data?.pool_hashrate||0),workerMode=!!opts.workerMode,samples=workerMode?[]:networkSamples(networkNow),r=",
+            1,
+        )
+        text = text.replace(
+            ",workerMode=!!opts.workerMode,accepted=",
+            ",accepted=",
+            1,
+        )
+        text = text.replace(
+            "${hashChartSvg(history,rangeSamples,networkNow)}",
+            "${workerMode?workerChartSvg(history):hashChartSvg(history,rangeSamples,networkNow)}",
+            1,
+        )
+        text = text.replace(
+            "const samples=networkSamples(Number(data.network_hashrate||0)),W=1120",
+            "const samples=opts.workerId?[]:networkSamples(Number(data.network_hashrate||0)),W=1120",
+            1,
+        )
+        text = text.replace(
+            '<div class="hash-metric"><span>Accepted</span><strong>${accepted.toLocaleString()}</strong><small>${rejected.toLocaleString()} rejected</small></div><div class="hash-metric"><span>Efficiency</span>',
+            '<div class="hash-metric"><span>Accepted</span><strong>${accepted.toLocaleString()}</strong></div><div class="hash-metric"><span>Rejected</span><strong>${rejected.toLocaleString()}</strong><small>${((accepted+rejected)>0?rejected/(accepted+rejected)*100:0).toFixed(2)}% reject rate</small></div><div class="hash-metric"><span>Efficiency</span>',
+            1,
+        )
+        text = text.replace(
+            '${workerMode?`<span><i class="hash-dot pool"></i>Worker hashrate</span>`:',
+            '${workerMode?`<span><i class="hash-dot pool"></i>Worker hashrate</span><span><i class="dot okdot"></i>Accepted shares</span><span><i class="dot baddot"></i>Rejected shares</span>`:',
+            1,
+        )
+        text = text.replace(
+            "Worker hashrate with the same chart layout used on the dashboard.",
+            "Worker hashrate and share activity over the selected time range.",
+        )
+        text = text.replace(
+            "Worker hashrate over selected range",
+            "Worker hashrate and share activity over selected range",
+        )
+        text = text.replace(
+            "</style>",
+            "#worker-hash-card .hash-metrics{grid-template-columns:repeat(4,minmax(130px,1fr))}"
+            ".worker-only-chart .share-accepted{fill:rgba(101,196,102,.42)}"
+            ".worker-only-chart .share-rejected{fill:rgba(255,120,120,.72)}"
+            "@media(max-width:900px){#worker-hash-card .hash-metrics{grid-template-columns:repeat(2,minmax(130px,1fr))}}"
+            "@media(max-width:520px){#worker-hash-card .hash-metrics{grid-template-columns:1fr}}"
+            "</style>",
+            1,
+        )
+
         # Keep six useful metric cards inside Network Hash vs Pool Hash:
         # Pool now, Network now, Pool share, Pool balance / Immature / Total paid,
         # Miners, and Estimated block time. Explicitly remove any legacy
