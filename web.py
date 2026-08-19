@@ -181,6 +181,7 @@ def api_worker_stats(worker_id, hours=24, bucket_seconds=300):
             return None
         raw = rows(con, """SELECT (s.ts / ?) * ? bucket,
             COALESCE(SUM(CASE WHEN s.accepted=1 THEN s.difficulty ELSE 0 END),0) accepted_diff,
+            COALESCE(SUM(CASE WHEN s.accepted=0 THEN s.difficulty ELSE 0 END),0) rejected_diff,
             COALESCE(SUM(CASE WHEN s.accepted=1 THEN 1 ELSE 0 END),0) accepted,
             COALESCE(SUM(CASE WHEN s.accepted=0 THEN 1 ELSE 0 END),0) rejected
             FROM shares s WHERE s.worker_id=? AND s.ts>=? AND s.ts<?
@@ -193,11 +194,14 @@ def api_worker_stats(worker_id, hours=24, bucket_seconds=300):
     while t <= end:
         r = by_bucket.get(t, {})
         accepted_diff = float(r.get("accepted_diff") or 0)
+        rejected_diff = float(r.get("rejected_diff") or 0)
         history.append({
             "ts": t,
             "hashrate": (accepted_diff / GHOSTRIDER_TARGET_FACTOR) * DIFF1_HASHES / bucket_seconds,
             "accepted": int(r.get("accepted") or 0),
             "rejected": int(r.get("rejected") or 0),
+            "accepted_diff": accepted_diff,
+            "rejected_diff": rejected_diff,
         })
         t += bucket_seconds
 
