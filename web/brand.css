@@ -349,24 +349,24 @@ main#app:has(> .grid)>section:not(:first-of-type){
   opacity:.9;
 }
 #combined-hash-card .combined-hash-chart .pool-line{
-  stroke:#69d16c;
-  stroke-width:3;
-  stroke-linecap:round;
-  stroke-linejoin:round;
-  filter:drop-shadow(0 0 4px rgba(101,196,102,.55));
-}
-#combined-hash-card .combined-hash-chart .network-line{
   stroke:#4ba8ff;
-  stroke-width:2.8;
+  stroke-width:3;
   stroke-linecap:round;
   stroke-linejoin:round;
   filter:drop-shadow(0 0 4px rgba(69,163,255,.45));
 }
-#combined-hash-card .combined-hash-chart .pool-area{fill:rgba(101,196,102,.15)}
-#combined-hash-card .combined-hash-chart .network-area{fill:rgba(69,163,255,.09)}
+#combined-hash-card .combined-hash-chart .network-line{
+  stroke:#69d16c;
+  stroke-width:2.8;
+  stroke-linecap:round;
+  stroke-linejoin:round;
+  filter:drop-shadow(0 0 4px rgba(101,196,102,.55));
+}
+#combined-hash-card .combined-hash-chart .pool-area{fill:rgba(69,163,255,.12)}
+#combined-hash-card .combined-hash-chart .network-area{fill:rgba(101,196,102,.10)}
 #combined-hash-card .combined-hash-chart .axis{font-size:10.5px;fill:#839288}
-#combined-hash-card .combined-hash-chart .pool-axis{fill:#82e087;font-weight:600}
-#combined-hash-card .combined-hash-chart .net-axis{fill:#71baff;font-weight:600}
+#combined-hash-card .combined-hash-chart .pool-axis{fill:#71baff;font-weight:600}
+#combined-hash-card .combined-hash-chart .net-axis{fill:#82e087;font-weight:600}
 #combined-hash-card .hash-crosshair{
   stroke:#b3c2b6;
   stroke-width:1;
@@ -393,6 +393,14 @@ main#app:has(> .grid)>section:not(:first-of-type){
   border-radius:999px;
   background:#121713;
   color:#b9c7bb;
+}
+#combined-hash-card .hash-legend .hash-dot.pool{
+  background:#4ba8ff;
+  box-shadow:0 0 5px rgba(75,168,255,.45);
+}
+#combined-hash-card .hash-legend .hash-dot.net{
+  background:#69d16c;
+  box-shadow:0 0 5px rgba(101,196,102,.45);
 }
 #combined-hash-card .hash-footer{
   margin-top:10px;
