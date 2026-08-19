@@ -73,7 +73,8 @@
       .configure-page .quick-card strong,.configure-page .quick-card code{font-size:14px;color:#e9f7ea}
       .configure-page .address-card{padding:16px;margin-top:14px;border:1px solid var(--yerb-border,#294332);border-radius:10px;background:linear-gradient(155deg,#171d18,#141714)}
       .configure-page .address-card label{display:block;font-weight:700;margin-bottom:7px}
-      .configure-page #configure-address{width:100%;box-sizing:border-box;font-family:monospace;padding:11px 12px;border-radius:7px;border:1px solid rgba(100,255,140,.35);background:#0b120d;color:inherit}
+      .configure-page #configure-address,.configure-page #configure-worker{width:100%;box-sizing:border-box;font-family:monospace;padding:11px 12px;border-radius:7px;border:1px solid rgba(100,255,140,.35);background:#0b120d;color:inherit}
+      .configure-page .worker-field{margin-top:12px}
       .configure-page .command-list{display:grid;gap:10px;margin-top:12px}
       .configure-page .command-card{padding:14px;border:1px solid var(--yerb-border,#294332);border-radius:9px;background:linear-gradient(155deg,#171d18,#141714)}
       .configure-page .command-head{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:8px;flex-wrap:wrap}
@@ -99,6 +100,10 @@
 
   function validAddress(value){
     return /^y[1-9A-HJ-NP-Za-km-z]{25,40}$/.test(value);
+  }
+
+  function validWorker(value){
+    return /^[A-Za-z0-9_-]{0,32}$/.test(value);
   }
 
   function copyText(text,button){
@@ -135,7 +140,7 @@
           </div>
         </div>
         <div class="command-row">
-          <input class="command-input" data-template="${esc(c.command)}" type="text" readonly value="${esc(c.command)}" aria-label="${esc(c.name)} command">
+          <input class="command-input" data-template="${esc(c.command)}" data-default-worker="${esc(c.worker)}" type="text" readonly value="${esc(c.command)}" aria-label="${esc(c.name)} command">
           <button type="button" class="copy-command">Copy</button>
         </div>
       </div>`).join('');
@@ -150,7 +155,7 @@
       <div class="configure-page">
         <section>
           <h2 class="configure-title">Configure</h2>
-          <div class="muted">Enter your Yerbas payout address once and copy a ready-to-run mining command for your hardware.</div>
+          <div class="muted">Enter your Yerbas payout address and an optional worker name, then copy a ready-to-run mining command for your hardware.</div>
           <div class="quick-grid">
             <div class="quick-card"><span class="label">Stratum endpoint</span><code>${STRATUM}</code> <button type="button" class="copy-stratum">Copy</button></div>
             <div class="quick-card"><span class="label">Algorithm</span><strong>GhostRider</strong></div>
@@ -158,13 +163,17 @@
           <div class="address-card">
             <label for="configure-address">Yerbas payout address</label>
             <input id="configure-address" type="text" autocomplete="off" spellcheck="false" placeholder="Enter your YERB address">
-            <div id="configure-address-message" class="small muted" style="margin-top:7px">Commands update automatically as you type. Worker names after the dot can be changed.</div>
+            <div class="worker-field">
+              <label for="configure-worker">Worker name (optional)</label>
+              <input id="configure-worker" type="text" autocomplete="off" spellcheck="false" maxlength="32" placeholder="rig1">
+            </div>
+            <div id="configure-address-message" class="small muted" style="margin-top:7px">Commands update automatically as you type. Leave worker name blank to use each miner's default worker suffix.</div>
           </div>
         </section>
 
         <section class="section-copy">
           <h2>Prebuilt Miner Commands</h2>
-          <div class="muted">Password is <code>x</code>. The worker suffix is optional and can be renamed for each rig.</div>
+          <div class="muted">Password is <code>x</code>. Worker names are optional and can be reused across compatible miners.</div>
         </section>
 
         <section>
@@ -179,26 +188,43 @@
       </div>`;
 
     const addressInput=root.querySelector('#configure-address');
+    const workerInput=root.querySelector('#configure-worker');
     const message=root.querySelector('#configure-address-message');
     const commandInputs=[...root.querySelectorAll('.command-input')];
 
     const updateCommands=()=>{
       const address=(addressInput.value||'').trim();
-      const valid=!address || validAddress(address);
-      addressInput.style.borderColor=valid?'rgba(100,255,140,.35)':'#a84a4a';
+      const worker=(workerInput.value||'').trim();
+      const addressValid=!address || validAddress(address);
+      const workerValid=validWorker(worker);
+      const valid=addressValid && workerValid;
+      addressInput.style.borderColor=addressValid?'rgba(100,255,140,.35)':'#a84a4a';
+      workerInput.style.borderColor=workerValid?'rgba(100,255,140,.35)':'#a84a4a';
       message.textContent=!address
-        ?'Commands update automatically as you type. Worker names after the dot can be changed.'
-        :valid
-          ?'Commands are ready with your Yerbas payout address.'
-          :'This does not look like a valid Yerbas payout address yet.';
+        ?'Commands update automatically as you type. Leave worker name blank to use each miner\'s default worker suffix.'
+        :!addressValid
+          ?'This does not look like a valid Yerbas payout address yet.'
+          :!workerValid
+            ?'Worker name may use only letters, numbers, hyphens and underscores, up to 32 characters.'
+            :worker
+              ?`Commands are ready with worker name ${worker}.`
+              :'Commands are ready with each miner\'s default worker suffix.';
       message.style.color=valid?'':'#ffaaaa';
       commandInputs.forEach(input=>{
-        input.value=(input.dataset.template||'').replaceAll(PLACEHOLDER,address||PLACEHOLDER);
+        const template=input.dataset.template||'';
+        const defaultWorker=input.dataset.defaultWorker||'';
+        const suffix=worker || defaultWorker;
+        const login=(address||PLACEHOLDER)+(suffix?'.'+suffix:'');
+        input.value=template
+          .replaceAll(`${PLACEHOLDER}.${defaultWorker}`,login)
+          .replaceAll(PLACEHOLDER,address||PLACEHOLDER);
       });
     };
 
     addressInput.addEventListener('input',updateCommands);
     addressInput.addEventListener('paste',()=>setTimeout(updateCommands,0));
+    workerInput.addEventListener('input',updateCommands);
+    workerInput.addEventListener('paste',()=>setTimeout(updateCommands,0));
     commandInputs.forEach(input=>input.addEventListener('click',()=>input.select()));
     root.querySelectorAll('.copy-command').forEach(button=>{
       button.addEventListener('click',()=>{
