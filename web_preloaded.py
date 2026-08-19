@@ -87,7 +87,7 @@ class PreloadedControlHandler(controls.ControlHandler):
             "#worker-hash-card .hash-metrics{grid-template-columns:repeat(4,minmax(130px,1fr))}"
             ".worker-only-chart .share-accepted{fill:rgba(101,196,102,.42)}"
             ".worker-only-chart .share-rejected{fill:rgba(255,120,120,.72)}"
-            ".worker-only-chart .pool-line{stroke:#4ba8ff}"
+            ".worker-only-chart .pool-line{stroke:#4ba8ff;stroke-width:4;stroke-linecap:round;stroke-linejoin:round;filter:drop-shadow(0 0 5px rgba(75,168,255,.65)) drop-shadow(0 0 10px rgba(75,168,255,.28))}"
             ".worker-only-chart .worker-share-axis{fill:#aab6ad}"
             ".combined-hash-chart .pool-block-bar{fill:#e5b94c;opacity:.95;filter:drop-shadow(0 0 4px #ff8c00)}"
             ".hash-dot.blocks{background:#e5b94c;border-radius:2px;box-shadow:0 0 4px #ff8c00}"
