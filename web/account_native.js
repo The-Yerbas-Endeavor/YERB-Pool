@@ -2,6 +2,8 @@
   if(!location.pathname.startsWith('/account/')) return;
 
   const WORKER_LINE_COLORS=['#f2c94c','#bb86fc','#ff8a65','#4dd0e1','#f06292'];
+  let lastBlockFoundAt=0;
+  let lastBlockTimer=null;
 
   function deriveCurrent(stat){
     if(!stat) return 0;
@@ -10,6 +12,23 @@
     const h=Array.isArray(stat.history)?stat.history:[];
     const tail=h.slice(-2);
     return tail.length?tail.reduce((n,x)=>n+Number(x.hashrate||0),0)/tail.length:0;
+  }
+
+  function formatSince(epoch){
+    const t=Number(epoch||0);
+    if(!t) return 'Never';
+    const age=Math.max(0,Math.floor(Date.now()/1000-t));
+    if(age<60) return `${age}s ago`;
+    if(age<3600){const m=Math.floor(age/60),s=age%60;return `${m}m ${String(s).padStart(2,'0')}s ago`;}
+    if(age<86400){const h=Math.floor(age/3600),m=Math.floor((age%3600)/60);return `${h}h ${String(m).padStart(2,'0')}m ago`;}
+    const d=Math.floor(age/86400),h=Math.floor((age%86400)/3600);return `${d}d ${h}h ago`;
+  }
+
+  function updateLastBlockTimer(){
+    const value=document.getElementById('account-last-block-value');
+    const detail=document.getElementById('account-last-block-time');
+    if(value) value.textContent=formatSince(lastBlockFoundAt);
+    if(detail) detail.textContent=lastBlockFoundAt?new Date(lastBlockFoundAt*1000).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'}):'no pool block found by this miner';
   }
 
   function nearestPoint(history,ts){
@@ -74,8 +93,8 @@
       <div class="hash-metrics account-hash-metrics">
         <div class="hash-metric"><span>Current hashrate</span><strong>${hashRate(current)}</strong><small>combined active estimate</small></div>
         <div class="hash-metric"><span>${rangeKey} average</span><strong>${hashRate(avg)}</strong><small>combined worker average</small></div>
-        <div class="hash-metric"><span>Accepted</span><strong>${accepted.toLocaleString()}</strong><small>shares in selected range</small></div>
-        <div class="hash-metric"><span>Rejected</span><strong>${rejected.toLocaleString()}</strong><small>${rejectRate.toFixed(2)}% reject rate</small></div>
+        <div class="hash-metric"><span>Accepted / Rejected</span><strong>${accepted.toLocaleString()} / ${rejected.toLocaleString()}</strong><small>${efficiency.toFixed(2)}% accepted · ${rejectRate.toFixed(2)}% rejected</small></div>
+        <div class="hash-metric"><span>Last block found</span><strong id="account-last-block-value">${formatSince(lastBlockFoundAt)}</strong><small id="account-last-block-time">${lastBlockFoundAt?new Date(lastBlockFoundAt*1000).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'}):'no pool block found by this miner'}</small></div>
         <div class="hash-metric"><span>Efficiency</span><strong>${efficiency.toFixed(2)}%</strong><small>accepted share ratio</small></div>
       </div>
       ${accountWorkerChartSvg(history,workerSeries)}
@@ -126,7 +145,12 @@
 
   account=async function(){
     const a=decodeURIComponent(location.pathname.slice('/account/'.length));
-    const x=await get('/api/account/'+encodeURIComponent(a));
+    const [x,shareRows]=await Promise.all([
+      get('/api/account/'+encodeURIComponent(a)),
+      get('/api/shares?address='+encodeURIComponent(a)+'&limit=1000').catch(()=>[])
+    ]);
+    const foundShares=(Array.isArray(shareRows)?shareRows:[]).filter(s=>Number(s.accepted||0)===1&&Number(s.block_candidate||0)===1);
+    lastBlockFoundAt=foundShares.length?Math.max(...foundShares.map(s=>Number(s.ts||0))):0;
     const workers=(x.workers||[]).filter(w=>w.id!==undefined&&w.id!==null);
     let rangeKey='24H';
     let rangeBusy=false;
@@ -153,6 +177,7 @@
       const card=document.getElementById('account-hash-card');
       bindHover(card,history,workerSeries);
       bindWorkerToggles(card);
+      updateLastBlockTimer();
       card?.querySelectorAll('[data-account-range]').forEach(btn=>{
         btn.onclick=async()=>{
           const key=btn.dataset.accountRange;
@@ -169,5 +194,6 @@
       });
     }
     await bindRangeButtons(initial.history,initial.workerSeries);
+    if(!lastBlockTimer) lastBlockTimer=setInterval(updateLastBlockTimer,1000);
   };
 })();
