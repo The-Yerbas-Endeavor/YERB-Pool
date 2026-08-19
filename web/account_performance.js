@@ -7,6 +7,8 @@
   let accountInfo=null;
   let workerIds=[];
   let busy=false;
+  let lastShareAt=0;
+  let lastShareTimer=null;
 
   function deriveCurrent(stat){
     if(!stat) return 0;
@@ -15,6 +17,16 @@
     const h=Array.isArray(stat.history)?stat.history:[];
     const tail=h.slice(-2);
     return tail.length?tail.reduce((n,x)=>n+Number(x.hashrate||0),0)/tail.length:0;
+  }
+
+  function formatSince(epoch){
+    const t=Number(epoch||0);
+    if(!t) return 'Never';
+    const age=Math.max(0,Math.floor(Date.now()/1000-t));
+    if(age<60) return `${age}s ago`;
+    if(age<3600){const m=Math.floor(age/60),s=age%60;return `${m}m ${String(s).padStart(2,'0')}s ago`;}
+    if(age<86400){const h=Math.floor(age/3600),m=Math.floor((age%3600)/60);return `${h}h ${String(m).padStart(2,'0')}m ago`;}
+    const d=Math.floor(age/86400),h=Math.floor((age%86400)/3600);return `${d}d ${h}h ago`;
   }
 
   function accountMetrics(history,current){
@@ -33,13 +45,20 @@
       <div class="hash-metrics account-hash-metrics">
         <div class="hash-metric"><span>Current hashrate</span><strong>${hashRate(m.current)}</strong><small>combined active estimate</small></div>
         <div class="hash-metric"><span>${selectedHashRange} average</span><strong>${hashRate(m.avg)}</strong><small>combined worker average</small></div>
-        <div class="hash-metric"><span>Accepted</span><strong>${m.accepted.toLocaleString()}</strong><small>shares in selected range</small></div>
-        <div class="hash-metric"><span>Rejected</span><strong>${m.rejected.toLocaleString()}</strong><small>${m.rejectRate.toFixed(2)}% reject rate</small></div>
+        <div class="hash-metric"><span>Accepted / Rejected</span><strong>${m.accepted.toLocaleString()} / ${m.rejected.toLocaleString()}</strong><small>${m.efficiency.toFixed(2)}% accepted · ${m.rejectRate.toFixed(2)}% rejected</small></div>
+        <div class="hash-metric" id="account-last-share-card"><span>Last share submitted</span><strong id="account-last-share-value">${formatSince(lastShareAt)}</strong><small id="account-last-share-time">${lastShareAt?new Date(lastShareAt*1000).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'}):'no submitted share recorded'}</small></div>
         <div class="hash-metric"><span>Efficiency</span><strong>${m.efficiency.toFixed(2)}%</strong><small>accepted share ratio</small></div>
       </div>
       ${workerChartSvg(history)}
       <div class="hash-legend"><span><i class="hash-dot pool"></i>Miner hashrate</span><span><i class="dot okdot"></i>Accepted shares</span><span><i class="dot baddot"></i>Rejected shares</span></div>
       <div class="hash-footer"><span>Combined activity for ${workerIds.length} worker${workerIds.length===1?'':'s'}</span><span>Updated ${new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'})}</span></div>`;
+  }
+
+  function updateLastShareTimer(){
+    const value=document.getElementById('account-last-share-value');
+    const detail=document.getElementById('account-last-share-time');
+    if(value) value.textContent=formatSince(lastShareAt);
+    if(detail) detail.textContent=lastShareAt?new Date(lastShareAt*1000).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'}):'no submitted share recorded';
   }
 
   function bindHover(history){
@@ -80,11 +99,13 @@
       const good=results.filter(Boolean);
       const history=aggregateHistory(good);
       const current=good.reduce((n,s)=>n+deriveCurrent(s),0);
+      lastShareAt=Math.max(0,...good.map(s=>Number(s.last_share_at||0)));
       const card=document.getElementById('account-hash-card');
       if(!card) return;
       card.innerHTML=history.length?accountPerformanceCard(history,current):'<div class="empty">No worker history recorded for this range.</div>';
       bindRanges();
       bindHover(history);
+      updateLastShareTimer();
     } finally {
       busy=false;
     }
@@ -132,6 +153,7 @@
     const card=replaceLegacyCharts();
     if(!card) return;
     await renderRange('24H');
+    if(!lastShareTimer) lastShareTimer=setInterval(updateLastShareTimer,1000);
   }
 
   const style=document.createElement('style');
