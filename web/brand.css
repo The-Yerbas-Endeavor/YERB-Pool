@@ -425,3 +425,88 @@ main#app:has(> .grid)>section:not(:first-of-type){
   background:#4ba8ff;
   box-shadow:0 0 5px rgba(75,168,255,.45);
 }
+
+/* Color-vision accessibility: every graph is readable without relying on hue. */
+#combined-hash-card .combined-hash-chart .pool-line,
+#worker-hash-card .worker-only-chart .pool-line,
+#account-hash-card .account-worker-chart .account-combined-line{
+  stroke-dasharray:none;
+  stroke-linecap:round;
+  stroke-linejoin:round;
+}
+#combined-hash-card .combined-hash-chart .network-line{
+  stroke-dasharray:12 7;
+}
+#combined-hash-card .hash-legend .hash-dot.pool,
+#worker-hash-card .hash-legend .hash-dot.pool,
+#account-hash-card .hash-legend .account-combined-dot{
+  width:26px!important;
+  height:4px!important;
+  border-radius:2px!important;
+  vertical-align:middle;
+}
+#combined-hash-card .hash-legend .hash-dot.net{
+  width:26px!important;
+  height:4px!important;
+  border-radius:0!important;
+  background:repeating-linear-gradient(90deg,#69d16c 0 8px,transparent 8px 13px)!important;
+  box-shadow:none!important;
+  vertical-align:middle;
+}
+#combined-hash-card .hash-legend .hash-dot.blocks{
+  width:9px!important;
+  height:12px!important;
+  border-radius:2px!important;
+}
+
+/* Accepted bars stay solid; rejected bars are outlined/dashed. */
+.worker-only-chart .share-accepted,
+.account-worker-chart .share-accepted{
+  stroke:none!important;
+}
+.worker-only-chart .share-rejected,
+.account-worker-chart .share-rejected{
+  fill-opacity:.30!important;
+  stroke:#ff9ea0!important;
+  stroke-width:1.2!important;
+  stroke-dasharray:2 2;
+  vector-effect:non-scaling-stroke;
+}
+#worker-hash-card .hash-legend .dot.okdot{
+  width:10px;height:10px;border-radius:2px;background:#8ee29b!important;
+}
+#worker-hash-card .hash-legend .dot.baddot{
+  width:10px;height:10px;border-radius:2px;background:transparent!important;border:2px dashed #ff9ea0;
+  box-sizing:border-box;
+}
+
+/* Miner-account workers use independent line patterns in addition to color. */
+.account-worker-chart .account-worker-line[data-worker-series="0"]{stroke-dasharray:14 6}
+.account-worker-chart .account-worker-line[data-worker-series="1"]{stroke-dasharray:7 4}
+.account-worker-chart .account-worker-line[data-worker-series="2"]{stroke-dasharray:2 5;stroke-linecap:round}
+.account-worker-chart .account-worker-line[data-worker-series="3"]{stroke-dasharray:14 4 2 4}
+.account-worker-chart .account-worker-line[data-worker-series="4"]{stroke-dasharray:1 4;stroke-linecap:round}
+.account-worker-legend .worker-series-toggle .worker-series-dot{
+  width:26px!important;height:4px!important;border-radius:0!important;vertical-align:middle;
+}
+.account-worker-legend .worker-series-toggle[data-worker-toggle="0"] .worker-series-dot{
+  background:repeating-linear-gradient(90deg,#f2c94c 0 12px,transparent 12px 18px)!important;
+}
+.account-worker-legend .worker-series-toggle[data-worker-toggle="1"] .worker-series-dot{
+  background:repeating-linear-gradient(90deg,#bb86fc 0 7px,transparent 7px 11px)!important;
+}
+.account-worker-legend .worker-series-toggle[data-worker-toggle="2"] .worker-series-dot{
+  background:repeating-linear-gradient(90deg,#ff8a65 0 2px,transparent 2px 7px)!important;
+}
+.account-worker-legend .worker-series-toggle[data-worker-toggle="3"] .worker-series-dot{
+  background:repeating-linear-gradient(90deg,#4dd0e1 0 12px,transparent 12px 16px,#4dd0e1 16px 18px,transparent 18px 22px)!important;
+}
+.account-worker-legend .worker-series-toggle[data-worker-toggle="4"] .worker-series-dot{
+  background:repeating-linear-gradient(90deg,#f06292 0 1px,transparent 1px 5px)!important;
+}
+.account-worker-legend>span:nth-last-child(2) .worker-series-dot{
+  width:10px!important;height:10px!important;border-radius:2px!important;background:#8ee29b!important;
+}
+.account-worker-legend>span:last-child .worker-series-dot{
+  width:10px!important;height:10px!important;border-radius:2px!important;background:transparent!important;border:2px dashed #ff9ea0;box-sizing:border-box;
+}
