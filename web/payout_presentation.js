@@ -200,6 +200,17 @@
         },0);
       }).observe(main,{childList:true});
     }
+
+    // Refresh the complete homepage once per minute. dashboard() redraws the
+    // hashrate graphs, Top Workers, and Recent Blocks; renderHome() then
+    // restores/refreshes the Recent Payouts card with current data.
+    setInterval(async()=>{
+      if(location.pathname!=='/' || busy) return;
+      try{
+        if(typeof dashboard==='function') await dashboard();
+        await renderHome();
+      }catch(_){ }
+    },60000);
   }
 
   async function installPayouts(){
