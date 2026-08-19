@@ -8,6 +8,7 @@ accepted-share difficulty estimator. Historical graphs use pre-aggregated
 import contextlib
 import mimetypes
 import sqlite3
+import threading
 import time
 from http.server import ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
@@ -19,6 +20,8 @@ from yerbpool.admin_settings import get_pool_fee_percent
 COIN = 100_000_000
 ACTIVE_WINDOW = 600
 HASHRATE_WINDOW = 120
+NETWORK_SAMPLE_INTERVAL = 60
+NETWORK_SAMPLE_RETENTION = 8 * 86400
 
 
 @contextlib.contextmanager
@@ -62,17 +65,57 @@ def _wallet_balance_atomic():
     return None
 
 
+def _record_network_hashrate(value):
+    """Persist one server-wide network hashrate sample per minute."""
+    if value is None:
+        return
+    try:
+        value = float(value)
+    except (TypeError, ValueError):
+        return
+    if value < 0:
+        return
+
+    now = int(time.time())
+    bucket = (now // NETWORK_SAMPLE_INTERVAL) * NETWORK_SAMPLE_INTERVAL
+    try:
+        with base.db() as con:
+            con.execute(
+                """CREATE TABLE IF NOT EXISTS network_hashrate_samples (
+                       ts INTEGER PRIMARY KEY,
+                       hashrate REAL NOT NULL
+                   )"""
+            )
+            con.execute(
+                "INSERT OR REPLACE INTO network_hashrate_samples(ts,hashrate) VALUES(?,?)",
+                (bucket, value),
+            )
+            con.execute(
+                "DELETE FROM network_hashrate_samples WHERE ts<?",
+                (now - NETWORK_SAMPLE_RETENTION,),
+            )
+            con.commit()
+    except sqlite3.Error:
+        # Network history is supplemental; never fail dashboard/RPC requests
+        # because SQLite is briefly busy or a migration is racing startup.
+        pass
+
+
+def _snapshot_result(difficulty, network_hashrate):
+    result = {
+        "network_difficulty": float(difficulty) if difficulty is not None else None,
+        "network_hashrate": float(network_hashrate) if network_hashrate is not None else None,
+    }
+    _record_network_hashrate(result["network_hashrate"])
+    return result
+
+
 def _mining_snapshot():
     """Fetch difficulty and network hashrate with one Core RPC when possible."""
     try:
         info = base.rpc_call("getmininginfo")
         if isinstance(info, dict):
-            difficulty = info.get("difficulty")
-            network_hashrate = info.get("networkhashps")
-            return {
-                "network_difficulty": float(difficulty) if difficulty is not None else None,
-                "network_hashrate": float(network_hashrate) if network_hashrate is not None else None,
-            }
+            return _snapshot_result(info.get("difficulty"), info.get("networkhashps"))
     except Exception:
         pass
 
@@ -82,17 +125,23 @@ def _mining_snapshot():
         difficulty = None
     try:
         network_hashrate = base.rpc_call("getnetworkhashps")
-        network_hashrate = float(network_hashrate) if network_hashrate is not None else None
     except Exception:
         network_hashrate = None
-    return {
-        "network_difficulty": difficulty,
-        "network_hashrate": network_hashrate,
-    }
+    return _snapshot_result(difficulty, network_hashrate)
 
 
 def _network_hashrate():
     return _mining_snapshot().get("network_hashrate")
+
+
+def _network_sampler_loop():
+    """Continuously collect network hashrate even when no dashboard is open."""
+    while True:
+        try:
+            _mining_snapshot()
+        except Exception:
+            pass
+        time.sleep(NETWORK_SAMPLE_INTERVAL)
 
 
 def api_summary():
@@ -237,7 +286,6 @@ def api_pool_history(hours=24, bucket_seconds=300):
     """Pool-wide history from the compact 60-second aggregate table."""
     hours = min(max(int(hours), 1), 168)
     bucket_seconds = min(max(int(bucket_seconds), 60), 3600)
-    # All supported chart bucket sizes are minute multiples.
     bucket_seconds = max(60, (bucket_seconds // 60) * 60)
     now = int(time.time())
     end = (now // bucket_seconds) * bucket_seconds
@@ -261,8 +309,6 @@ def api_pool_history(hours=24, bucket_seconds=300):
                 (bucket_seconds, bucket_seconds, start, end + bucket_seconds, bucket_seconds, bucket_seconds),
             )
         else:
-            # Migration-safe fallback for the brief interval before PoolDB has
-            # created/backfilled the aggregate table.
             raw = base.rows(
                 con,
                 """SELECT (ts / ?) * ? bucket,
@@ -294,6 +340,42 @@ def api_pool_history(hours=24, bucket_seconds=300):
     return history
 
 
+def api_network_history(hours=24, bucket_seconds=300):
+    """Return centrally stored Yerbas network hashrate history."""
+    hours = min(max(int(hours), 1), 168)
+    bucket_seconds = min(max(int(bucket_seconds), 60), 3600)
+    bucket_seconds = max(60, (bucket_seconds // 60) * 60)
+    now = int(time.time())
+    end = (now // bucket_seconds) * bucket_seconds
+    start = end - hours * 3600
+
+    try:
+        with base.db() as con:
+            con.execute(
+                """CREATE TABLE IF NOT EXISTS network_hashrate_samples (
+                       ts INTEGER PRIMARY KEY,
+                       hashrate REAL NOT NULL
+                   )"""
+            )
+            raw = base.rows(
+                con,
+                """SELECT (ts / ?) * ? bucket,
+                          AVG(hashrate) hashrate
+                   FROM network_hashrate_samples
+                   WHERE ts>=? AND ts<?
+                   GROUP BY (ts / ?) * ?
+                   ORDER BY bucket""",
+                (bucket_seconds, bucket_seconds, start, end + bucket_seconds, bucket_seconds, bucket_seconds),
+            )
+    except sqlite3.Error:
+        return []
+
+    return [
+        {"ts": int(row["bucket"]), "hashrate": float(row.get("hashrate") or 0)}
+        for row in raw
+    ]
+
+
 def _recent_pool_hashrate():
     """Canonical rolling 2-minute pool hashrate."""
     cutoff = int(time.time()) - HASHRATE_WINDOW
@@ -310,8 +392,10 @@ def api_hashrate_chart(hours=24, bucket_seconds=600):
     """Everything the dashboard chart needs in one fast response."""
     history = api_pool_history(hours, bucket_seconds)
     mining = _mining_snapshot()
+    network_history = api_network_history(hours, bucket_seconds)
     return {
         "history": history,
+        "network_history": network_history,
         "pool_hashrate": _recent_pool_hashrate(),
         "hashrate_window_seconds": HASHRATE_WINDOW,
         "network_difficulty": mining.get("network_difficulty"),
@@ -416,6 +500,9 @@ base.api_worker_stats = api_worker_stats
 base.api_account = api_account
 base.api_luck = api_luck
 base.api_shares = api_shares
+
+# Keep network history populated independently of browser traffic.
+threading.Thread(target=_network_sampler_loop, name="network-hashrate-sampler", daemon=True).start()
 
 
 class LiveHandler(base.Handler):
