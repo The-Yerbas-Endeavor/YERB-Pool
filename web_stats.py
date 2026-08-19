@@ -188,9 +188,10 @@ def api_worker_stats(worker_id, hours=24, bucket_seconds=300):
     now = int(time.time())
     cutoff = now - HASHRATE_WINDOW
     with base.db() as con:
-        recent = base.one(con, """SELECT COALESCE(SUM(difficulty),0) accepted_diff,
+        recent = base.one(con, """SELECT
+                      COALESCE(SUM(CASE WHEN accepted=1 AND ts>=? THEN difficulty ELSE 0 END),0) accepted_diff,
                       COALESCE(MAX(CASE WHEN accepted=1 THEN ts ELSE NULL END),0) last_share_at
-               FROM shares WHERE worker_id=? AND accepted=1 AND ts>=?""", (int(worker_id), cutoff))
+               FROM shares WHERE worker_id=?""", (cutoff, int(worker_id)))
     result["hashrate"] = _hashrate_from_diff(recent.get("accepted_diff"))
     result["recent_diff"] = float(recent.get("accepted_diff") or 0)
     result["last_share_at"] = int(recent.get("last_share_at") or 0)
