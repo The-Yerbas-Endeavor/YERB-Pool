@@ -1,6 +1,8 @@
 (function(){
   let state={pool:null,health:null};
   let refreshBusy=false;
+  let workerShareTimer=null;
+  let workerLastShareAt=0;
 
   function ensureStyle(){
     if(document.getElementById('yerb-pool-status-style')) return;
@@ -113,6 +115,69 @@
     return `${m}m ${String(s).padStart(2,'0')}s`;
   }
 
+  function formatSince(epoch){
+    const t=Number(epoch||0);
+    if(!t) return 'Never';
+    const age=Math.max(0,Math.floor(Date.now()/1000-t));
+    if(age<60) return `${age}s ago`;
+    if(age<3600){
+      const m=Math.floor(age/60),s=age%60;
+      return `${m}m ${String(s).padStart(2,'0')}s ago`;
+    }
+    if(age<86400){
+      const h=Math.floor(age/3600),m=Math.floor((age%3600)/60);
+      return `${h}h ${String(m).padStart(2,'0')}m ago`;
+    }
+    const d=Math.floor(age/86400),h=Math.floor((age%86400)/3600);
+    return `${d}d ${h}h ago`;
+  }
+
+  function renderWorkerLastShare(){
+    if(!location.pathname.startsWith('/worker/')) return;
+    const metrics=document.querySelector('#worker-hash-card .hash-metrics');
+    if(!metrics) return;
+    let card=document.getElementById('worker-last-share-card');
+    if(!card){
+      card=document.createElement('div');
+      card.id='worker-last-share-card';
+      card.className='hash-metric';
+      card.innerHTML='<span>Last share submitted</span><strong id="worker-last-share-value">—</strong><small id="worker-last-share-time">waiting for share data</small>';
+      metrics.appendChild(card);
+    }
+    const value=document.getElementById('worker-last-share-value');
+    const detail=document.getElementById('worker-last-share-time');
+    if(value) value.textContent=formatSince(workerLastShareAt);
+    if(detail){
+      detail.textContent=workerLastShareAt
+        ? new Date(workerLastShareAt*1000).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'})
+        : 'no submitted share recorded';
+    }
+  }
+
+  async function refreshWorkerLastShare(){
+    if(!location.pathname.startsWith('/worker/')) return;
+    const id=location.pathname.slice('/worker/'.length);
+    if(!id) return;
+    try{
+      const r=await fetch(`/api/worker/${encodeURIComponent(id)}/stats?hours=1&bucket=60`,{cache:'no-store'});
+      if(r.ok){
+        const data=await r.json();
+        workerLastShareAt=Number(data.last_share_at||0);
+      }
+    }catch(_){}
+    renderWorkerLastShare();
+  }
+
+  function setHealthWorkerTimer(){
+    if(!location.pathname.startsWith('/worker/')) return;
+    refreshWorkerLastShare();
+    if(workerShareTimer) return;
+    workerShareTimer=setInterval(()=>{
+      renderWorkerLastShare();
+    },1000);
+    setInterval(refreshWorkerLastShare,15000);
+  }
+
   function render(){
     ensureStyle();
     if(!ensureStrip()) return;
@@ -140,6 +205,7 @@
     if(fee) fee.textContent=Number(p.pool_fee_percent||0).toFixed(2)+'%';
     const payout=document.getElementById('status-payout');
     if(payout) payout.textContent=formatCountdown(p.next_payout_check_at);
+    renderWorkerLastShare();
   }
 
   async function refresh(){
@@ -163,6 +229,7 @@
     ensureStrip();
     render();
     refresh();
+    setHealthWorkerTimer();
     setInterval(refresh,15000);
     setInterval(()=>{
       const payout=document.getElementById('status-payout');
