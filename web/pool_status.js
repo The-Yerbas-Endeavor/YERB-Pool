@@ -147,7 +147,7 @@
     const acceptedValue=accepted.querySelector('strong')?.textContent.trim()||'0';
     const rejectedValue=rejected.querySelector('strong')?.textContent.trim()||'0';
     const rejectDetail=rejected.querySelector('small')?.textContent.trim()||'';
-    accepted.querySelector('span').textContent='Shares';
+    accepted.querySelector('span').textContent='Accepted / Rejected';
     accepted.querySelector('strong').textContent=`${acceptedValue} / ${rejectedValue}`;
     const detail=accepted.querySelector('small');
     if(detail) detail.textContent=rejectDetail ? `accepted / rejected · ${rejectDetail}` : 'accepted / rejected';
