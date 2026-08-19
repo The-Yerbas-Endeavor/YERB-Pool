@@ -82,6 +82,22 @@ class PreloadedControlHandler(controls.ControlHandler):
             "Worker hashrate and accepted/rejected share counts over the selected time range.",
         )
         text = text.replace("Worker hashrate over selected range", "Worker hashrate and share counts over selected range")
+
+        # Hover labels/colors must match the visible chart legend. #4ba8ff is
+        # reserved for pool/user hashrate; network remains Yerbas green.
+        text = text.replace(
+            '<span style="color:#80d985">Worker</span>: ${esc(hashRate(pool))}',
+            '<span style="color:#4ba8ff">Worker hashrate</span>: ${esc(hashRate(pool))}',
+        )
+        text = text.replace(
+            '<span style="color:#80d985">Pool</span>: ${esc(hashRate(pool))}',
+            '<span style="color:#4ba8ff">Pool hashrate</span>: ${esc(hashRate(pool))}',
+        )
+        text = text.replace(
+            '<span style="color:#6eb7ff">Network</span>: ${esc(hashRate(net))}',
+            '<span style="color:#69d16c">Network hashrate</span>: ${esc(hashRate(net))}',
+        )
+
         text = text.replace(
             "</style>",
             "#worker-hash-card .hash-metrics{grid-template-columns:repeat(4,minmax(130px,1fr))}"
