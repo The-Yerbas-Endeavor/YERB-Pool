@@ -99,7 +99,7 @@
         <div class="hash-metric"><span>Efficiency</span><strong>${efficiency.toFixed(2)}%</strong><small>accepted share ratio</small></div>
       </div>
       ${accountWorkerChartSvg(history,workerSeries)}
-      <div class="hash-legend account-worker-legend"><span><i class="hash-dot account-combined-dot" style="background:${COMBINED_LINE_COLOR};box-shadow:0 0 5px rgba(75,168,255,.45)"></i>Combined</span>${workerSeries.map((w,i)=>`<button type="button" class="worker-series-toggle active" data-worker-toggle="${i}"><i class="worker-series-dot" style="background:${WORKER_LINE_COLORS[i%WORKER_LINE_COLORS.length]}"></i>${esc(w.name)}</button>`).join('')}<span><i class="dot okdot"></i>Accepted shares</span><span><i class="dot baddot"></i>Rejected shares</span></div>
+      <div class="hash-legend account-worker-legend"><span><i class="hash-dot account-combined-dot" style="background:${COMBINED_LINE_COLOR};box-shadow:0 0 5px rgba(75,168,255,.45)"></i>User hashrate</span>${workerSeries.map((w,i)=>`<button type="button" class="worker-series-toggle active" data-worker-toggle="${i}"><i class="worker-series-dot" style="background:${WORKER_LINE_COLORS[i%WORKER_LINE_COLORS.length]}"></i>${esc(w.name)}</button>`).join('')}<span><i class="dot okdot"></i>Accepted shares</span><span><i class="dot baddot"></i>Rejected shares</span></div>
       ${workerCount>workerSeries.length?`<div class="small muted account-worker-note">Showing top ${workerSeries.length} workers by current hashrate.</div>`:''}
       <div class="hash-footer"><span>Combined activity for ${workerCount} worker${workerCount===1?'':'s'}</span><span>Updated ${new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'})}</span></div>`;
   }
@@ -118,7 +118,7 @@
       const x=L+(Number(best.ts)-min)/Math.max(1,max-min)*(W-L-R);
       cross.setAttribute('x1',x); cross.setAttribute('x2',x); cross.style.opacity='1';
       tip.hidden=false;
-      let detail=`<strong>${esc(new Date(Number(best.ts)*1000).toLocaleString())}</strong><br><span style="color:${COMBINED_LINE_COLOR}">Combined</span>: ${esc(hashRate(Number(best.hashrate||0)))}`;
+      let detail=`<strong>${esc(new Date(Number(best.ts)*1000).toLocaleString())}</strong><br><span style="color:${COMBINED_LINE_COLOR}">User hashrate</span>: ${esc(hashRate(Number(best.hashrate||0)))}`;
       workerSeries.forEach((worker,i)=>{
         const line=card.querySelector(`[data-worker-series="${i}"]`);
         if(line?.classList.contains('series-hidden')) return;
