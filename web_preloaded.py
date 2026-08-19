@@ -86,9 +86,27 @@ class PreloadedControlHandler(controls.ControlHandler):
             "#worker-hash-card .hash-metrics{grid-template-columns:repeat(4,minmax(130px,1fr))}"
             ".worker-only-chart .share-accepted{fill:rgba(101,196,102,.42)}"
             ".worker-only-chart .share-rejected{fill:rgba(255,120,120,.72)}"
+            ".combined-hash-chart .pool-block-bar{fill:#e5b94c;opacity:.95}"
+            ".hash-dot.blocks{background:#e5b94c;border-radius:2px}"
             "@media(max-width:900px){#worker-hash-card .hash-metrics{grid-template-columns:repeat(2,minmax(130px,1fr))}}"
             "@media(max-width:520px){#worker-hash-card .hash-metrics{grid-template-columns:1fr}}"
             "</style>",
+            1,
+        )
+
+        # Add pool-found block markers to the native production hashrate chart.
+        # The API already returns pool_blocks; keep the six-card native layout
+        # and decorate its existing SVG rather than loading the legacy chart JS.
+        block_chart_js = r'''function nativePoolBlockBars(history,blocks){const rows=Array.isArray(history)?history:[],list=Array.isArray(blocks)?blocks:[];if(!rows.length||!list.length)return'';const W=1120,L=72,R=78,T=22,B=46,H=340,iw=W-L-R,ih=H-T-B,min=Number(rows[0].ts||0),max=Number(rows[rows.length-1].ts||min+1),px=ts=>L+(Number(ts)-min)/Math.max(1,max-min)*iw;return list.filter(b=>Number(b.submitted_at)>=min&&Number(b.submitted_at)<=max).map(b=>{const x=px(b.submitted_at);return `<rect class="pool-block-bar" data-height="${esc(b.height)}" x="${(x-2.5).toFixed(1)}" y="${(T+ih-18).toFixed(1)}" width="5" height="18" rx="1"><title>Pool block #${esc(b.height)} · ${esc(new Date(Number(b.submitted_at)*1000).toLocaleString())}</title></rect>`}).join('')}'''
+        text = text.replace("function combinedHashChart(data,opts={}){", block_chart_js + "\nfunction combinedHashChart(data,opts={}){", 1)
+        text = text.replace(
+            "${workerMode?workerChartSvg(history):hashChartSvg(history,rangeSamples,networkNow)}",
+            "${workerMode?workerChartSvg(history):hashChartSvg(history,rangeSamples,networkNow).replace('</svg>',nativePoolBlockBars(history,data?.pool_blocks)+'</svg>')}",
+            1,
+        )
+        text = text.replace(
+            '<span><i class="hash-dot net"></i>Network hashrate</span>`}',
+            '<span><i class="hash-dot net"></i>Network hashrate</span><span><i class="hash-dot blocks"></i>Blocks found by pool</span>`}',
             1,
         )
 
