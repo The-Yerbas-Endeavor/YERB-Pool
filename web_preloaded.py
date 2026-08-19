@@ -53,7 +53,7 @@ class PreloadedControlHandler(controls.ControlHandler):
         text = text.replace("function combinedHashChart(data,opts={}){", worker_chart_js + "\nfunction combinedHashChart(data,opts={}){", 1)
         text = text.replace(
             "poolNow=Number(data?.pool_hashrate||0),samples=networkSamples(networkNow),r=",
-            "poolNow=Number(data?.pool_hashrate||0),workerMode=!!opts.workerMode,samples=workerMode?[]:networkSamples(networkNow),r=",
+            "poolNow=Number(data?.pool_hashrate||0),workerMode=!!opts.workerMode,samples=workerMode?[]:(Array.isArray(data?.network_history)?data.network_history:[]),r=",
             1,
         )
         text = text.replace(",workerMode=!!opts.workerMode,accepted=", ",accepted=", 1)
@@ -64,7 +64,7 @@ class PreloadedControlHandler(controls.ControlHandler):
         )
         text = text.replace(
             "const samples=networkSamples(Number(data.network_hashrate||0)),W=1120",
-            "const samples=opts.workerId?[]:networkSamples(Number(data.network_hashrate||0)),W=1120",
+            "const samples=opts.workerId?[]:(Array.isArray(data.network_history)?data.network_history:[]),W=1120",
             1,
         )
         text = text.replace(
