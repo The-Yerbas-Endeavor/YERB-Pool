@@ -55,6 +55,9 @@
       #yerb-pool-status a{color:inherit;text-decoration:none}
       #yerb-pool-status a:hover{text-decoration:underline}
       #yerb-pool-status .status-spacer{flex:1}
+      #worker-hash-card .hash-metrics{grid-template-columns:repeat(4,minmax(130px,1fr))!important}
+      @media(max-width:900px){#worker-hash-card .hash-metrics{grid-template-columns:repeat(2,minmax(130px,1fr))!important}}
+      @media(max-width:520px){#worker-hash-card .hash-metrics{grid-template-columns:1fr!important}}
       @media(max-width:700px){
         body{padding-bottom:74px!important}
         #yerb-pool-status .status-inner{
@@ -132,17 +135,39 @@
     return `${d}d ${h}h ago`;
   }
 
+  function mergeWorkerShareCards(){
+    if(!location.pathname.startsWith('/worker/')) return;
+    const metrics=document.querySelector('#worker-hash-card .hash-metrics');
+    if(!metrics) return;
+    const cards=[...metrics.querySelectorAll('.hash-metric')];
+    const accepted=cards.find(card=>card.querySelector('span')?.textContent.trim()==='Accepted');
+    const rejected=cards.find(card=>card.querySelector('span')?.textContent.trim()==='Rejected');
+    if(!accepted||!rejected) return;
+
+    const acceptedValue=accepted.querySelector('strong')?.textContent.trim()||'0';
+    const rejectedValue=rejected.querySelector('strong')?.textContent.trim()||'0';
+    const rejectDetail=rejected.querySelector('small')?.textContent.trim()||'';
+    accepted.querySelector('span').textContent='Shares';
+    accepted.querySelector('strong').textContent=`${acceptedValue} / ${rejectedValue}`;
+    const detail=accepted.querySelector('small');
+    if(detail) detail.textContent=rejectDetail ? `accepted / rejected · ${rejectDetail}` : 'accepted / rejected';
+    rejected.remove();
+  }
+
   function renderWorkerLastShare(){
     if(!location.pathname.startsWith('/worker/')) return;
     const metrics=document.querySelector('#worker-hash-card .hash-metrics');
     if(!metrics) return;
+    mergeWorkerShareCards();
     let card=document.getElementById('worker-last-share-card');
     if(!card){
       card=document.createElement('div');
       card.id='worker-last-share-card';
       card.className='hash-metric';
       card.innerHTML='<span>Last share submitted</span><strong id="worker-last-share-value">—</strong><small id="worker-last-share-time">waiting for share data</small>';
-      metrics.appendChild(card);
+      const efficiency=[...metrics.querySelectorAll('.hash-metric')].find(x=>x.querySelector('span')?.textContent.trim()==='Efficiency');
+      if(efficiency) metrics.insertBefore(card,efficiency);
+      else metrics.appendChild(card);
     }
     const value=document.getElementById('worker-last-share-value');
     const detail=document.getElementById('worker-last-share-time');
