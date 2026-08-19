@@ -110,6 +110,14 @@ class PreloadedControlHandler(controls.ControlHandler):
             1,
         )
 
+        # Add the number of pool blocks in the hovered time bucket to the
+        # dashboard tooltip. Worker tooltips remain unchanged.
+        text = text.replace(
+            "<br>Pool share: ${share.toFixed(2)}%`;tip.style.left=",
+            "<br>Pool share: ${share.toFixed(2)}%<br>Blocks found: ${Array.isArray(data.pool_blocks)?data.pool_blocks.filter(b=>{const bucket=history.length>1?Math.max(1,Number(history[1].ts)-Number(history[0].ts)):600;return Number(b.submitted_at)>=Number(best.ts)&&Number(b.submitted_at)<Number(best.ts)+bucket}).length:0}`;tip.style.left=",
+            1,
+        )
+
         # Six dashboard metrics inside Network Hash vs Pool Hash.
         text = text.replace(
             ".hash-metrics{display:grid;grid-template-columns:repeat(3,minmax(130px,1fr));",
