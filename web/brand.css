@@ -411,3 +411,9 @@ main#app:has(> .grid)>section:not(:first-of-type){
   #combined-hash-card .combined-hash-chart{height:310px}
   #combined-hash-card .hash-range button{padding:6px 10px}
 }
+
+/* Worker chart hashrate legend matches the blue worker line. */
+#worker-hash-card .hash-legend .hash-dot.pool{
+  background:#4ba8ff;
+  box-shadow:0 0 5px rgba(75,168,255,.45);
+}
