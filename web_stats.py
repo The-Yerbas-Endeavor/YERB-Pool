@@ -206,14 +206,17 @@ def api_account(address):
         return None
     cutoff = int(time.time()) - HASHRATE_WINDOW
     with base.db() as con:
-        recent = base.one(con, """SELECT COALESCE(SUM(s.difficulty),0) accepted_diff,
+        recent = base.one(con, """SELECT
+                      COALESCE(SUM(CASE WHEN s.accepted=1 AND s.ts>=? THEN s.difficulty ELSE 0 END),0) accepted_diff,
                       COALESCE(MAX(CASE WHEN s.accepted=1 THEN s.ts ELSE NULL END),0) last_share_at,
-                      COUNT(DISTINCT CASE WHEN s.accepted=1 AND s.ts>=? THEN s.worker_id END) active_workers
+                      COUNT(DISTINCT CASE WHEN s.accepted=1 AND s.ts>=? THEN s.worker_id END) active_workers,
+                      COALESCE(MAX(CASE WHEN s.accepted=1 AND s.block_candidate=1 THEN s.ts ELSE NULL END),0) last_block_found_at
                FROM shares s JOIN accounts a ON a.id=s.account_id
-               WHERE a.address=? AND s.accepted=1 AND s.ts>=?""", (cutoff, address, cutoff))
+               WHERE a.address=?""", (cutoff, cutoff, address))
     result["combined_hashrate"] = _hashrate_from_diff(recent.get("accepted_diff"))
     result["recent_diff"] = float(recent.get("accepted_diff") or 0)
     result["last_share_at"] = int(recent.get("last_share_at") or 0)
+    result["last_block_found_at"] = int(recent.get("last_block_found_at") or 0)
     result["active_workers"] = int(recent.get("active_workers") or 0)
     result["hashrate_window_seconds"] = HASHRATE_WINDOW
     return result
