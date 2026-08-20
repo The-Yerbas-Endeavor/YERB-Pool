@@ -3,10 +3,23 @@
 
   const COMBINED_LINE_COLOR='#4ba8ff';
   const WORKER_LINE_COLORS=['#f2c94c','#bb86fc','#ff8a65','#4dd0e1','#f06292'];
+  const WORKER_LINE_PATTERNS=['14 6','7 4','2 5','14 4 2 4','1 4','10 3 2 3','5 3 1 3'];
   const ACCEPTED_COLOR='#8ee29b';
   const REJECTED_COLOR='#ff9ea0';
   let lastBlockFoundAt=0;
   let lastBlockTimer=null;
+
+  function workerVisual(slot){
+    const index=Math.max(0,Number(slot)||0);
+    return {
+      color:WORKER_LINE_COLORS[index%WORKER_LINE_COLORS.length],
+      dash:WORKER_LINE_PATTERNS[index%WORKER_LINE_PATTERNS.length]
+    };
+  }
+
+  function workerIdentityLabel(worker){
+    return `${worker.name||`Worker ${worker.id}`} · Worker #${worker.id}`;
+  }
 
   function deriveCurrent(stat){
     if(!stat) return 0;
@@ -72,7 +85,7 @@
 
     workerSeries.forEach((worker,i)=>{
       const pts=(worker.history||[]).filter(x=>Number(x.ts)>=min&&Number(x.ts)<=max).map(x=>`${px(x.ts).toFixed(1)},${py(x.hashrate).toFixed(1)}`).join(' ');
-      if(pts) workerLines+=`<polyline class="account-worker-line" data-worker-series="${i}" points="${pts}" style="stroke:${WORKER_LINE_COLORS[i%WORKER_LINE_COLORS.length]}"/>`;
+      if(pts) workerLines+=`<polyline class="account-worker-line" data-worker-series="${i}" data-worker-id="${esc(worker.id)}" points="${pts}" style="stroke:${worker.color};stroke-dasharray:${worker.dash};stroke-linecap:round"/>`;
     });
 
     const count=selectedHashRange==='7D'?7:6;
@@ -101,8 +114,8 @@
         <div class="hash-metric"><span>Efficiency</span><strong>${efficiency.toFixed(2)}%</strong><small>accepted share ratio</small></div>
       </div>
       ${accountWorkerChartSvg(history,workerSeries)}
-      <div class="hash-legend account-worker-legend"><span><i class="hash-dot account-combined-dot" style="background:${COMBINED_LINE_COLOR};box-shadow:0 0 8px rgba(75,168,255,.7)"></i>User hashrate</span>${workerSeries.map((w,i)=>`<button type="button" class="worker-series-toggle active" data-worker-toggle="${i}"><i class="worker-series-dot" style="background:${WORKER_LINE_COLORS[i%WORKER_LINE_COLORS.length]}"></i>${esc(w.name)}</button>`).join('')}<span><i class="worker-series-dot" style="background:${ACCEPTED_COLOR}"></i>Accepted shares</span><span><i class="worker-series-dot" style="background:${REJECTED_COLOR}"></i>Rejected shares</span></div>
-      ${workerCount>workerSeries.length?`<div class="small muted account-worker-note">Showing top ${workerSeries.length} workers by current hashrate.</div>`:''}
+      <div class="hash-legend account-worker-legend"><span><i class="hash-dot account-combined-dot" style="background:${COMBINED_LINE_COLOR};box-shadow:0 0 8px rgba(75,168,255,.7)"></i>User hashrate</span>${workerSeries.map((w,i)=>`<button type="button" class="worker-series-toggle active" data-worker-toggle="${i}" data-worker-id="${esc(w.id)}"><svg class="worker-series-swatch" width="28" height="10" viewBox="0 0 28 10" aria-hidden="true"><line x1="1" y1="5" x2="27" y2="5" stroke="${w.color}" stroke-width="3" stroke-dasharray="${w.dash}" stroke-linecap="round"/></svg>${esc(w.label)}</button>`).join('')}<span><i class="worker-series-dot" style="background:${ACCEPTED_COLOR}"></i>Accepted shares</span><span><i class="worker-series-dot" style="background:${REJECTED_COLOR}"></i>Rejected shares</span></div>
+      ${workerCount>workerSeries.length?`<div class="small muted account-worker-note">Showing top ${workerSeries.length} workers by current hashrate; worker colors and line patterns remain tied to worker ID.</div>`:''}
       <div class="hash-footer"><span>Combined activity for ${workerCount} worker${workerCount===1?'':'s'}</span><span>Updated ${new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'})}</span></div>`;
   }
 
@@ -125,7 +138,7 @@
         const line=card.querySelector(`[data-worker-series="${i}"]`);
         if(line?.classList.contains('series-hidden')) return;
         const point=nearestPoint(worker.history,Number(best.ts));
-        if(point) detail+=`<br><span style="color:${WORKER_LINE_COLORS[i%WORKER_LINE_COLORS.length]}">${esc(worker.name)}</span>: ${esc(hashRate(Number(point.hashrate||0)))}`;
+        if(point) detail+=`<br><span style="color:${worker.color}">${esc(worker.label)}</span>: ${esc(hashRate(Number(point.hashrate||0)))}`;
       });
       detail+=`<br><span style="color:${ACCEPTED_COLOR}">Accepted shares</span>: ${Number(best.accepted||0).toLocaleString()}<br><span style="color:${REJECTED_COLOR}">Rejected shares</span>: ${Number(best.rejected||0).toLocaleString()}`;
       tip.innerHTML=detail;
@@ -155,6 +168,9 @@
     const foundShares=(Array.isArray(shareRows)?shareRows:[]).filter(s=>Number(s.accepted||0)===1&&Number(s.block_candidate||0)===1);
     lastBlockFoundAt=foundShares.length?Math.max(...foundShares.map(s=>Number(s.ts||0))):0;
     const workers=(x.workers||[]).filter(w=>w.id!==undefined&&w.id!==null);
+    const workerIdentitySlots=new Map([...workers]
+      .sort((a,b)=>Number(a.id)-Number(b.id))
+      .map((worker,index)=>[String(worker.id),index]));
     let rangeKey='24H';
     let rangeBusy=false;
 
@@ -165,15 +181,28 @@
         return stat?{worker,stat}:null;
       }));
       const good=results.filter(Boolean);
-      const workerSeries=good.map(({worker,stat})=>({id:worker.id,name:worker.name||`Worker ${worker.id}`,history:Array.isArray(stat.history)?stat.history:[],current:deriveCurrent(stat)})).sort((a,b)=>b.current-a.current).slice(0,5);
+      const workerSeries=good.map(({worker,stat})=>{
+        const identitySlot=workerIdentitySlots.get(String(worker.id))??0;
+        const visual=workerVisual(identitySlot);
+        return {
+          id:worker.id,
+          name:worker.name||`Worker ${worker.id}`,
+          label:workerIdentityLabel(worker),
+          identitySlot,
+          color:visual.color,
+          dash:visual.dash,
+          history:Array.isArray(stat.history)?stat.history:[],
+          current:deriveCurrent(stat)
+        };
+      }).sort((a,b)=>b.current-a.current).slice(0,5);
       return {history:aggregateHistory(good.map(x=>x.stat)),current:good.reduce((n,x)=>n+deriveCurrent(x.stat),0),workerSeries};
     }
 
     const initial=await fetchRange(rangeKey);
-    app.innerHTML=`<a class="back" href="/miners">← Miners</a><section><h2>Miner Account</h2><div>${addressLink(x.address)} &nbsp; ${explorerAddress(x.address)}</div><div class="grid" style="margin-top:18px"><div class="card"><div class="muted">Mature Balance</div><div class="value">${coin(x.balance_atomic)}</div><div>YERB</div></div><div class="card"><div class="muted">Immature Balance</div><div class="value">${coin(x.immature_balance_atomic)}</div><div>YERB</div></div><div class="card"><div class="muted">Total Earned</div><div class="value">${coin(x.total_earned_atomic)}</div><div>YERB</div></div><div class="card"><div class="muted">Total Paid</div><div class="value">${coin(x.total_paid_atomic)}</div><div>YERB</div></div></div></section><section><div class="chart-grid" style="grid-template-columns:1fr"><div class="chart-card" id="account-hash-card">${initial.history.length?performanceMarkup(initial.history,initial.current,rangeKey,workers.length,initial.workerSeries):'<div class="empty">No worker history recorded yet.</div>'}</div></div></section><section><h2>Workers</h2>${x.workers.length?table(['Worker','Accepted','Rejected','Last Seen'],x.workers.map(w=>`<tr><td><a href="/worker/${w.id}"><code>${esc(w.name)}</code></a></td><td>${w.accepted_shares}</td><td>${w.rejected_shares}</td><td>${ago(w.last_seen_at)}</td></tr>`)):'<div class="empty">No workers.</div>'}</section><section><h2>Ledger</h2>${x.ledger.length?table(['Time','Type','Amount','Block','Note'],x.ledger.map(l=>`<tr><td>${when(l.ts)}</td><td>${status(l.entry_type)}</td><td>${coin(l.amount_atomic)} YERB</td><td>${l.block_id??'—'}</td><td>${esc(l.note||'')}</td></tr>`)):'<div class="empty">No ledger entries.</div>'}</section><section><h2>Payout History</h2>${x.payouts.length?table(['ID','Status','Amount','Sent','TXID'],x.payouts.map(p=>`<tr><td>#${p.id}</td><td>${status(p.status)}</td><td>${coin(p.amount_atomic)} YERB</td><td>${when(p.sent_at)}</td><td>${explorerTx(p.txid)}</td></tr>`)):'<div class="empty">No payouts.</div>'}</section>`;
+    app.innerHTML=`<a class="back" href="/miners">← Miners</a><section><h2>Miner Account</h2><div>${addressLink(x.address)} &nbsp; ${explorerAddress(x.address)}</div><div class="grid" style="margin-top:18px"><div class="card"><div class="muted">Mature Balance</div><div class="value">${coin(x.balance_atomic)}</div><div>YERB</div></div><div class="card"><div class="muted">Immature Balance</div><div class="value">${coin(x.immature_balance_atomic)}</div><div>YERB</div></div><div class="card"><div class="muted">Total Earned</div><div class="value">${coin(x.total_earned_atomic)}</div><div>YERB</div></div><div class="card"><div class="muted">Total Paid</div><div class="value">${coin(x.total_paid_atomic)}</div><div>YERB</div></div></div></section><section><div class="chart-grid" style="grid-template-columns:1fr"><div class="chart-card" id="account-hash-card">${initial.history.length?performanceMarkup(initial.history,initial.current,rangeKey,workers.length,initial.workerSeries):'<div class="empty">No worker history recorded yet.</div>'}</div></div></section><section><h2>Workers</h2>${x.workers.length?table(['Worker','Accepted','Rejected','Last Seen'],x.workers.map(w=>`<tr><td><a href="/worker/${w.id}"><code>${esc(w.name)}</code></a><div class="small muted">Worker #${esc(w.id)}</div></td><td>${w.accepted_shares}</td><td>${w.rejected_shares}</td><td>${ago(w.last_seen_at)}</td></tr>`)):'<div class="empty">No workers.</div>'}</section><section><h2>Ledger</h2>${x.ledger.length?table(['Time','Type','Amount','Block','Note'],x.ledger.map(l=>`<tr><td>${when(l.ts)}</td><td>${status(l.entry_type)}</td><td>${coin(l.amount_atomic)} YERB</td><td>${l.block_id??'—'}</td><td>${esc(l.note||'')}</td></tr>`)):'<div class="empty">No ledger entries.</div>'}</section><section><h2>Payout History</h2>${x.payouts.length?table(['ID','Status','Amount','Sent','TXID'],x.payouts.map(p=>`<tr><td>#${p.id}</td><td>${status(p.status)}</td><td>${coin(p.amount_atomic)} YERB</td><td>${when(p.sent_at)}</td><td>${explorerTx(p.txid)}</td></tr>`)):'<div class="empty">No payouts.</div>'}</section>`;
 
     const style=document.createElement('style');
-    style.textContent=`#account-hash-card .account-hash-metrics{grid-template-columns:repeat(5,minmax(130px,1fr))}#account-hash-card{min-height:520px}.account-worker-chart .account-worker-line{fill:none;stroke-width:1.8;opacity:.92;vector-effect:non-scaling-stroke}.account-worker-chart .account-combined-line{stroke-width:4;stroke-linecap:round;stroke-linejoin:round;filter:drop-shadow(0 0 6px rgba(75,168,255,.72)) drop-shadow(0 0 12px rgba(75,168,255,.38));vector-effect:non-scaling-stroke}.account-worker-chart .share-accepted{fill:${ACCEPTED_COLOR};opacity:.42}.account-worker-chart .share-rejected{fill:${REJECTED_COLOR};opacity:.82}.account-worker-chart .series-hidden{opacity:0}.account-worker-legend{align-items:center}.worker-series-toggle{border:0;background:transparent;color:inherit;padding:2px 5px;cursor:pointer;font:inherit;opacity:.45}.worker-series-toggle.active{opacity:1}.worker-series-dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px}.account-worker-note{text-align:center;margin-top:5px}@media(max-width:1000px){#account-hash-card .account-hash-metrics{grid-template-columns:repeat(2,minmax(130px,1fr))}}@media(max-width:520px){#account-hash-card .account-hash-metrics{grid-template-columns:1fr}}`;
+    style.textContent=`#account-hash-card .account-hash-metrics{grid-template-columns:repeat(5,minmax(130px,1fr))}#account-hash-card{min-height:520px}.account-worker-chart .account-worker-line{fill:none;stroke-width:1.8;opacity:.92;vector-effect:non-scaling-stroke}.account-worker-chart .account-combined-line{stroke-width:4;stroke-linecap:round;stroke-linejoin:round;filter:drop-shadow(0 0 6px rgba(75,168,255,.72)) drop-shadow(0 0 12px rgba(75,168,255,.38));vector-effect:non-scaling-stroke}.account-worker-chart .share-accepted{fill:${ACCEPTED_COLOR};opacity:.42}.account-worker-chart .share-rejected{fill:${REJECTED_COLOR};opacity:.82}.account-worker-chart .series-hidden{opacity:0}.account-worker-legend{align-items:center}.worker-series-toggle{display:inline-flex;align-items:center;gap:5px;border:0;background:transparent;color:inherit;padding:2px 5px;cursor:pointer;font:inherit;opacity:.45}.worker-series-toggle.active{opacity:1}.worker-series-swatch{display:inline-block;flex:0 0 auto;overflow:visible}.worker-series-dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px}.account-worker-note{text-align:center;margin-top:5px}@media(max-width:1000px){#account-hash-card .account-hash-metrics{grid-template-columns:repeat(2,minmax(130px,1fr))}}@media(max-width:520px){#account-hash-card .account-hash-metrics{grid-template-columns:1fr}}`;
     document.head.appendChild(style);
 
     async function bindRangeButtons(history,workerSeries){
