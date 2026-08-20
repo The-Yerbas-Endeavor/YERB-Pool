@@ -161,12 +161,8 @@
 
   account=async function(){
     const a=decodeURIComponent(location.pathname.slice('/account/'.length));
-    const [x,shareRows]=await Promise.all([
-      get('/api/account/'+encodeURIComponent(a)),
-      get('/api/shares?address='+encodeURIComponent(a)+'&limit=1000').catch(()=>[])
-    ]);
-    const foundShares=(Array.isArray(shareRows)?shareRows:[]).filter(s=>Number(s.accepted||0)===1&&Number(s.block_candidate||0)===1);
-    lastBlockFoundAt=foundShares.length?Math.max(...foundShares.map(s=>Number(s.ts||0))):0;
+    const x=await get('/api/account/'+encodeURIComponent(a));
+    lastBlockFoundAt=Math.max(0,Number(x.last_block_found_at||0)||0);
     const workers=(x.workers||[]).filter(w=>w.id!==undefined&&w.id!==null);
     const workerIdentitySlots=new Map([...workers]
       .sort((a,b)=>Number(a.id)-Number(b.id))
