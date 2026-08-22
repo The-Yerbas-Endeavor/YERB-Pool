@@ -15,7 +15,11 @@
       "target_share_seconds": 12,
       "retarget_seconds": 60,
       "variance_percent": 30,
-      "max_step_factor": 2.0
+      "max_step_factor": 2.0,
+      "max_up_step_factor": 1.5,
+      "idle_timeout_seconds": 60,
+      "idle_step_factor": 2.0,
+      "idle_poll_seconds": 12
     }
   },
   "payouts": {
