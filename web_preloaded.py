@@ -80,6 +80,14 @@ class PreloadedControlHandler(controls.ControlHandler):
             '<div class="hash-metric"><span>Accepted</span><strong>${accepted.toLocaleString()}</strong></div><div class="hash-metric"><span>Rejected</span><strong>${rejected.toLocaleString()}</strong><small>${((accepted+rejected)>0?rejected/(accepted+rejected)*100:0).toFixed(2)}% reject rate</small></div><div class="hash-metric"><span>Efficiency</span>',
             1,
         )
+        # Efficiency duplicates information already conveyed by accepted and
+        # rejected share counts, so keep Worker Performance focused on four
+        # selected-range metrics.
+        text = text.replace(
+            '<div class="hash-metric"><span>Efficiency</span><strong>${efficiency.toFixed(2)}%</strong><small>Last seen ${ago(lastSeen)}</small></div>',
+            '',
+            1,
+        )
         text = text.replace(
             '${workerMode?`<span><i class="hash-dot pool"></i>Worker hashrate</span>`:',
             '${workerMode?`<span><i class="hash-dot pool"></i>Worker hashrate</span><span><i class="dot okdot"></i>Accepted shares</span><span><i class="dot baddot"></i>Rejected shares</span>`:',
@@ -108,7 +116,7 @@ class PreloadedControlHandler(controls.ControlHandler):
 
         text = text.replace(
             "</style>",
-            "#worker-hash-card .hash-metrics{grid-template-columns:repeat(5,minmax(130px,1fr))}"
+            "#worker-hash-card .hash-metrics{grid-template-columns:repeat(4,minmax(130px,1fr))}"
             ".worker-only-chart .share-accepted{fill:rgba(101,196,102,.42)}"
             ".worker-only-chart .share-rejected{fill:rgba(255,120,120,.72)}"
             ".worker-only-chart .pool-line{stroke:#4ba8ff;stroke-width:4;stroke-linecap:round;stroke-linejoin:round;filter:drop-shadow(0 0 5px rgba(75,168,255,.65)) drop-shadow(0 0 10px rgba(75,168,255,.28))}"
