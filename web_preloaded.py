@@ -67,6 +67,14 @@ class PreloadedControlHandler(controls.ControlHandler):
             "const samples=opts.workerId?[]:(Array.isArray(data.network_history)?data.network_history:[]),W=1120",
             1,
         )
+        # Give selected-range average hashrate its own Worker Performance card.
+        # ps.avg is calculated from the history returned for the active range,
+        # so it automatically follows 1H / 6H / 12H / 24H / 7D selections.
+        text = text.replace(
+            '<div class="hash-metric"><span>Current hashrate</span><strong>${hashRate(poolNow)}</strong><small>${selectedHashRange} average ${hashRate(ps.avg)}</small></div>',
+            '<div class="hash-metric"><span>Current hashrate</span><strong>${hashRate(poolNow)}</strong><small>live worker estimate</small></div><div class="hash-metric"><span>${selectedHashRange} average</span><strong>${hashRate(ps.avg)}</strong><small>average over selected chart range</small></div>',
+            1,
+        )
         text = text.replace(
             '<div class="hash-metric"><span>Accepted</span><strong>${accepted.toLocaleString()}</strong><small>${rejected.toLocaleString()} rejected</small></div><div class="hash-metric"><span>Efficiency</span>',
             '<div class="hash-metric"><span>Accepted</span><strong>${accepted.toLocaleString()}</strong></div><div class="hash-metric"><span>Rejected</span><strong>${rejected.toLocaleString()}</strong><small>${((accepted+rejected)>0?rejected/(accepted+rejected)*100:0).toFixed(2)}% reject rate</small></div><div class="hash-metric"><span>Efficiency</span>',
@@ -100,7 +108,7 @@ class PreloadedControlHandler(controls.ControlHandler):
 
         text = text.replace(
             "</style>",
-            "#worker-hash-card .hash-metrics{grid-template-columns:repeat(4,minmax(130px,1fr))}"
+            "#worker-hash-card .hash-metrics{grid-template-columns:repeat(5,minmax(130px,1fr))}"
             ".worker-only-chart .share-accepted{fill:rgba(101,196,102,.42)}"
             ".worker-only-chart .share-rejected{fill:rgba(255,120,120,.72)}"
             ".worker-only-chart .pool-line{stroke:#4ba8ff;stroke-width:4;stroke-linecap:round;stroke-linejoin:round;filter:drop-shadow(0 0 5px rgba(75,168,255,.65)) drop-shadow(0 0 10px rgba(75,168,255,.28))}"
