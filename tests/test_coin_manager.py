@@ -2,12 +2,13 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from yerbpool.coin_manager import deployment_plan, normalize_coin, save_coin
+from yerbpool.coin_manager import activation_command, deployment_plan, normalize_coin, save_coin
 
 
 def sample(**overrides):
     data = {
         "slug": "exm", "name": "Example", "ticker": "EXM", "algorithm": "GhostRider",
+        "pool_address": "EexamplePoolPayoutAddress",
         "domain": "exm.pool.yerbas.org", "stratum_port": 3334, "web_port": 8081,
         "rpc": {"url": "http://127.0.0.1:8332", "user": "rpcuser", "password": "secret"},
         "payouts": {"coinbase_maturity": 100, "minimum_payout": "1.0", "pool_fee_percent": 1, "check_interval_seconds": 7200},
@@ -40,6 +41,14 @@ class CoinManagerTests(unittest.TestCase):
         self.assertEqual(plan["pool_service"], "pool@exm.service")
         self.assertEqual(plan["web_service"], "pool-web@exm.service")
         self.assertEqual(plan["firewall"], [3334])
+
+    def test_certbot_activation_command_is_bounded(self):
+        command = activation_command(sample(), "admin@example.org")
+        self.assertEqual(command, "sudo python3 /opt/yerb-pool/scripts/deploy-coin.py activate exm --email admin@example.org")
+        with self.assertRaisesRegex(ValueError, "Certbot"):
+            activation_command(sample(), "not-an-email")
+        with self.assertRaisesRegex(ValueError, "Certbot"):
+            activation_command(sample(), "admin;id@example.org")
 
 
 if __name__ == "__main__":
