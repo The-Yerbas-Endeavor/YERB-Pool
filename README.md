@@ -1,5 +1,10 @@
 # YERB Pool
 
+> Multi-coin administration is under development on the dedicated feature branch. The Admin
+> panel can create validated coin drafts and preview isolated domains, ports, folders,
+> databases, services, nginx sites, DNS, and firewall requirements without modifying the
+> production YERB instance. Privileged activation remains a separate explicit operator step.
+
 A standalone Yerbas (YERB) GhostRider mining pool with Stratum, proportional block accounting, automated batched payouts, an admin treasury, and a live web dashboard.
 
 ## Production baseline
