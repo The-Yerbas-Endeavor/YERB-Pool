@@ -168,6 +168,38 @@ Public/read-only diagnostics:
 /api/accounting-integrity
 ```
 
+Public API discovery and versioned endpoints:
+
+```text
+/api
+/api/help
+/api/meta
+/api/v1/summary
+/api/v1/health
+/api/v1/blocks?limit=100&offset=0
+/api/v1/payouts?limit=100&offset=0
+/api/v1/miners?limit=100&offset=0
+/api/v1/workers?limit=100&offset=0
+/api/v1/shares?status=accepted&limit=100&offset=0
+```
+
+The legacy list endpoints continue returning bare arrays for dashboard
+compatibility. The `/api/v1` list endpoints return `items`, `pagination`, and
+`generated_at`. Exact coin values are retained as atomic integers and are also
+provided as eight-decimal strings where applicable.
+
+Miner-specific API routes:
+
+```text
+/api/account/{address}/summary
+/api/account/{address}/payments
+/api/account/{address}/earnings/daily?days=30
+/api/account/{address}/balance-changes
+/api/account/{address}/blocks
+/api/account/{address}/performance?hours=24&bucket=600
+/api/worker/{id}/performance?hours=24&bucket=600
+```
+
 Local accounting reconciliation:
 
 ```bash

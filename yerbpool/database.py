@@ -132,10 +132,15 @@ class PoolDB:
             CREATE INDEX IF NOT EXISTS idx_shares_worker ON shares(worker);
             CREATE INDEX IF NOT EXISTS idx_shares_ts ON shares(ts);
             CREATE INDEX IF NOT EXISTS idx_shares_account ON shares(account_id, ts);
+            CREATE INDEX IF NOT EXISTS idx_shares_id_accepted ON shares(accepted, id DESC);
+            CREATE INDEX IF NOT EXISTS idx_shares_account_accepted_id ON shares(account_id, accepted, id DESC);
+            CREATE INDEX IF NOT EXISTS idx_shares_worker_ts ON shares(worker_id, ts);
             CREATE INDEX IF NOT EXISTS idx_shares_ts_accepted_diff ON shares(ts, accepted, difficulty);
             CREATE INDEX IF NOT EXISTS idx_blocks_status ON blocks(status, height);
             CREATE INDEX IF NOT EXISTS idx_ledger_account ON ledger(account_id, ts);
+            CREATE INDEX IF NOT EXISTS idx_ledger_account_type_ts ON ledger(account_id, entry_type, ts);
             CREATE INDEX IF NOT EXISTS idx_payouts_status ON payouts(status, created_at);
+            CREATE INDEX IF NOT EXISTS idx_payout_items_account_payout ON payout_items(account_id, payout_id);
             """)
             self._migrate(db)
             self._backfill_share_buckets(db)
@@ -232,7 +237,7 @@ class PoolDB:
                 """INSERT OR IGNORE INTO blocks(
                     height,block_hash,job_id,finder_account_id,finder_worker_id,reward_atomic,network_reward_atomic,status,
                     submitted_at,maturity_height,round_start_share_id,round_end_share_id
-                ) VALUES(?,?,?,?,?,?,?,'submitted',?,?,?,?,?)""",
+                ) VALUES(?,?,?,?,?,?,?,'submitted',?,?,?,?)""",
                 (height, block_hash, job_id, account_id, worker_id, int(reward_atomic), int(network_reward_atomic), now,
                  int(maturity_height), round_start, int(round_end_share_id)),
             )
