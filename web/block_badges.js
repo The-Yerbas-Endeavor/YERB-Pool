@@ -5,6 +5,15 @@
     Orphan:{color:'#ffaaaa',border:'#8f4444',background:'rgba(180,65,65,.18)'}
   };
 
+  // Reject Breakdown is intentionally omitted from public miner/worker views.
+  // Keep rejection data available on the Shares page for troubleshooting.
+  if(!document.getElementById('yerb-hide-reject-breakdown')){
+    const style=document.createElement('style');
+    style.id='yerb-hide-reject-breakdown';
+    style.textContent='#account-reject-breakdown,#worker-reject-breakdown{display:none!important}';
+    document.head.appendChild(style);
+  }
+
   function paintBlockBadges(root=document){
     root.querySelectorAll('table tbody tr').forEach(row=>{
       const cells=row.querySelectorAll('td');
