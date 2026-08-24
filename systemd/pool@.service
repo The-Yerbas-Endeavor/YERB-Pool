@@ -1,0 +1,23 @@
+[Unit]
+Description=Mining Pool (%i)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=%ipool
+Group=%ipool
+WorkingDirectory=/opt/%i-pool
+ExecStartPre=/usr/bin/test -s /opt/%i-pool/config.json
+ExecStartPre=/usr/bin/test -s /opt/%i-pool/native/build/libyerb_ghostrider.so
+ExecStart=/usr/bin/python3 /opt/%i-pool/pool.py
+Restart=on-failure
+RestartSec=10
+LimitNOFILE=65536
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/opt/%i-pool
+
+[Install]
+WantedBy=multi-user.target
