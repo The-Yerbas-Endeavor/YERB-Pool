@@ -93,10 +93,11 @@ def public_summary():
     try:
         luck = admin.live.api_luck()
         settings = effective_public_settings()
+        coin_cfg = admin.CFG.get("coin", {})
         result["coin"] = {
-            "name": "Yerbas",
-            "symbol": "YERB",
-            "algorithm": "GhostRider",
+            "name": coin_cfg.get("name", "Yerbas"),
+            "symbol": coin_cfg.get("ticker", coin_cfg.get("symbol", "YERB")),
+            "algorithm": coin_cfg.get("algorithm", "GhostRider"),
             "network": "mainnet",
             "decimals": 8,
         }
@@ -107,7 +108,10 @@ def public_summary():
             "minimum_payout": str(settings.get("minimum_payout", "1.00000000")),
             "hashrate": float(luck.get("pool_hashrate") or 0),
             "hashrate_window_seconds": int(luck.get("hashrate_window_seconds") or 120),
-            "stratum": "stratum+tcp://pool.yerbas.org:3333",
+            "stratum": "stratum+tcp://{}:{}".format(
+                coin_cfg.get("domain", "pool.yerbas.org"),
+                admin.CFG.get("stratum", {}).get("port", 3333),
+            ),
         }
         result["network"] = {
             "difficulty": luck.get("network_difficulty"),
