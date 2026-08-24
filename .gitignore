@@ -1,5 +1,6 @@
 # Runtime configuration and pool data
 config.json
+coins.json
 *.db
 *.db-wal
 *.db-shm
