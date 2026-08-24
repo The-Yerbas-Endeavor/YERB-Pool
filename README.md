@@ -5,6 +5,27 @@
 > databases, services, nginx sites, DNS, and firewall requirements without modifying the
 > production YERB instance. Privileged activation remains a separate explicit operator step.
 
+### Multi-coin activation
+
+The Admin panel stores additional coins as isolated drafts and produces a server activation
+command. Activation currently supports Bitcoin-style JSON-RPC coins using the exact
+GhostRider implementation verified by this pool. Other algorithms must receive and pass a
+native share-verification adapter before they can be activated.
+
+For each activated coin the helper creates `/opt/<slug>-pool`, a dedicated service user and
+SQLite database, `pool@<slug>` and `pool-web@<slug>` services, an nginx virtual host, and a
+unique Stratum port. After verifying that the subdomain resolves to the pool server, it runs
+Certbot's nginx integration with redirect enabled and activates HTTPS for that subdomain.
+
+The Admin panel displays the exact bounded command, for example:
+
+```bash
+sudo python3 /opt/yerb-pool/scripts/deploy-coin.py activate exm --email admin@example.org
+```
+
+The existing `/opt/yerb-pool`, `yerb-pool.service`, `yerb-pool-web.service`, and
+`pool.yerbas.org` nginx configuration are not replaced by this operation.
+
 A standalone Yerbas (YERB) GhostRider mining pool with Stratum, proportional block accounting, automated batched payouts, an admin treasury, and a live web dashboard.
 
 ## Production baseline
