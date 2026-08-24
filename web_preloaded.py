@@ -232,7 +232,7 @@ class PreloadedControlHandler(controls.ControlHandler):
         body_text = text.replace(
             "</body>",
             luck_script
-            + '<script src="/reward_labels.js?v=7"></script>'
+            + '<script src="/reward_labels.js?v=8"></script>'
             + '<script src="/block_badges.js?v=1"></script>'
             + '<script src="/pool_activity_range.js?v=1"></script></body>',
         )

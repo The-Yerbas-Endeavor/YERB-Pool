@@ -403,7 +403,7 @@ class LiveHandler(base.Handler):
             text = text.replace("if(location.pathname.startsWith('/worker/'))setInterval(worker,30000);", "")
             text = text.replace("if(location.pathname.startsWith('/account/'))setInterval(account,30000);", "")
             text = text.replace("</head>", '<link rel="stylesheet" href="/brand.css?v=1"></head>')
-            body = text.replace("</body>", base.LUCK_SCRIPT + '<script src="/reward_labels.js?v=6"></script></body>').encode()
+            body = text.replace("</body>", base.LUCK_SCRIPT + '<script src="/reward_labels.js?v=8"></script></body>').encode()
         else:
             body = target.read_bytes()
         self.send_response(200)

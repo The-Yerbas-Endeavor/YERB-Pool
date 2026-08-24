@@ -40,7 +40,7 @@ if "/block_presentation.js" not in admin.live.base.LUCK_SCRIPT:
 if "/payout_presentation.js" not in admin.live.base.LUCK_SCRIPT:
     admin.live.base.LUCK_SCRIPT += '<script src="/payout_presentation.js?v=4"></script>'
 if "/worker_detail.js" not in admin.live.base.LUCK_SCRIPT:
-    admin.live.base.LUCK_SCRIPT += '<script src="/worker_detail.js?v=12"></script>'
+    admin.live.base.LUCK_SCRIPT += '<script src="/worker_detail.js?v=13"></script>'
 
 
 def effective_public_settings():
@@ -282,7 +282,7 @@ def api_help():
             {"method": "GET", "path": "/api/payouts/{id}", "description": "Payout batch and complete recipient list"},
             {"method": "GET", "path": "/api/v1/miners", "parameters": "limit,offset"},
             {"method": "GET", "path": "/api/v1/workers", "parameters": "limit,offset"},
-            {"method": "GET", "path": "/api/v1/shares", "parameters": "status,address,limit,offset"},
+            {"method": "GET", "path": "/api/v1/shares", "parameters": "status,address,worker,limit,offset"},
             {"method": "GET", "path": "/api/account/{address}/summary"},
             {"method": "GET", "path": "/api/account/{address}/payments", "parameters": "limit,offset"},
             {"method": "GET", "path": "/api/account/{address}/earnings/daily", "parameters": "days,limit,offset"},
@@ -553,6 +553,7 @@ def api_v1_list(resource, query):
     offset = _bounded_int((query.get("offset") or [0])[0], 0, 0, 1_000_000)
     status = (query.get("status") or [None])[0]
     address = (query.get("address") or [None])[0]
+    worker_id = (query.get("worker") or [None])[0]
     with admin.live.base.db() as con:
         if resource == "blocks":
             clause = ""
@@ -600,6 +601,9 @@ def api_v1_list(resource, query):
             if address:
                 clauses.append("a.address=?")
                 params.append(address)
+            if worker_id:
+                clauses.append("s.worker_id=?")
+                params.append(int(worker_id))
             where = " WHERE " + " AND ".join(clauses) if clauses else ""
             total = admin.live.base.one(
                 con,
