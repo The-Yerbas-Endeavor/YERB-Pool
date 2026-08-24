@@ -1,4 +1,14 @@
 {
+  "coin": {
+    "name": "Yerbas",
+    "ticker": "YERB",
+    "symbol": "YERB",
+    "algorithm": "ghostrider",
+    "adapter": "yerbas",
+    "domain": "pool.yerbas.org",
+    "explorer_url": "https://explorer.yerbas.org",
+    "decimals": 8
+  },
   "rpc": {
     "url": "http://127.0.0.1:15419",
     "user": "CHANGE_ME",
