@@ -90,6 +90,11 @@ class PublicApiTest(unittest.TestCase):
         self.assertEqual(page["pagination"]["total"], 2)
         self.assertEqual(len(page["items"]), 1)
         self.assertTrue(page["pagination"]["has_more"])
+        with self.db._connect() as con:
+            rig1 = con.execute("SELECT id FROM workers WHERE name='rig1'").fetchone()[0]
+        rejected = api.api_v1_list("shares", {"status": ["rejected"], "worker": [str(rig1)], "limit": ["25"], "offset": ["0"]})
+        self.assertEqual(rejected["pagination"]["total"], 1)
+        self.assertEqual(rejected["items"][0]["worker_id"], rig1)
         paths = {item["path"] for item in api.api_help()["endpoints"]}
         self.assertIn("/api/v1/shares", paths)
         self.assertIn("/api/account/{address}/earnings/daily", paths)
