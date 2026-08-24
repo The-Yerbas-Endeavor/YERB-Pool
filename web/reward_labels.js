@@ -215,31 +215,45 @@
   };
 
   window.shares = async function(){
-    const q=new URLSearchParams(location.search),statusQ=q.get('status'),address=q.get('address'),params=new URLSearchParams({limit:'1000'});
+    if(!document.getElementById('yerb-share-pagination-styles')){
+      const style=document.createElement('style');
+      style.id='yerb-share-pagination-styles';
+      style.textContent='.yerb-pagination{display:flex;align-items:center;justify-content:center;gap:7px;flex-wrap:wrap;margin:18px 0 4px}.yerb-pagination .badge{min-width:34px;text-align:center;font-weight:700}.yerb-pagination .badge.active{border-color:#65c466;background:rgba(101,196,102,.16);color:#effff0}.yerb-pagination .badge.disabled{opacity:.35;pointer-events:none}.yerb-pagination-info{color:#829184;font-size:11px;margin:0 4px}';
+      document.head.appendChild(style);
+    }
+    const q=new URLSearchParams(location.search),statusQ=q.get('status'),address=q.get('address'),workerQ=q.get('worker');
+    const pageSize=25;
+    let page=Math.max(1,parseInt(q.get('page')||'1',10)||1);
+    const params=new URLSearchParams({limit:String(pageSize),offset:String((page-1)*pageSize)});
     if(statusQ) params.set('status',statusQ);
     if(address) params.set('address',address);
-    const all=await get('/api/shares?'+params);
-    const rejectedPage=statusQ==='rejected';
-    const pageSize=rejectedPage?10:1000;
-    const requestedPage=Math.max(1,parseInt(q.get('page')||'1',10)||1);
-    const totalPages=Math.max(1,Math.ceil(all.length/pageSize));
-    const page=Math.min(requestedPage,totalPages);
-    const s=all.slice((page-1)*pageSize,page*pageSize);
+    if(workerQ) params.set('worker',workerQ);
+    let response=await get('/api/v1/shares?'+params);
+    let s=Array.isArray(response.items)?response.items:[];
+    const total=Number(response.pagination?.total||0);
+    const totalPages=Math.max(1,Math.ceil(total/pageSize));
+    if(page>totalPages){
+      page=totalPages;
+      params.set('offset',String((page-1)*pageSize));
+      response=await get('/api/v1/shares?'+params);
+      s=Array.isArray(response.items)?response.items:[];
+    }
     const headers=['Time','Address / Worker','Difficulty','Result'];
-    if(statusQ==='rejected' || all.some(x=>x.rejection_reason)) headers.push('Reason');
+    const showReason=statusQ==='rejected'||s.some(x=>x.rejection_reason);
+    if(showReason) headers.push('Reason');
     headers.push('Block Candidate','Hash');
     const rows=s.map(x=>{
       const cells=[`<td>${when(x.ts)}</td>`,`<td>${x.address?addressLink(x.address):''}<div><code>${esc(x.worker)}</code></div></td>`,`<td>${Number(x.difficulty).toExponential(4)}</td>`,`<td>${x.accepted?'<span class="ok">Accepted</span>':'<span class="bad">Rejected</span>'}</td>`];
-      if(statusQ==='rejected' || all.some(y=>y.rejection_reason)) cells.push(`<td>${x.accepted?'—':esc(friendlyRejectReason(x.rejection_reason))}</td>`);
+      if(showReason) cells.push(`<td>${x.accepted?'—':esc(friendlyRejectReason(x.rejection_reason))}</td>`);
       cells.push(`<td>${x.block_candidate?'Yes':'No'}</td>`,`<td><code>${esc(short(x.hash))}</code></td>`);
       return '<tr>'+cells.join('')+'</tr>';
     });
-    let pager='';
-    if(rejectedPage && all.length){
-      const makeHref=p=>{const next=new URLSearchParams(q);next.set('page',String(p));return '/shares?'+next.toString();};
-      pager=`<div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-top:14px"><span class="muted small">Page ${page} of ${totalPages} · ${all.length.toLocaleString()} recent rejected shares</span><div style="display:flex;gap:10px">${page>1?`<a class="badge" href="${makeHref(page-1)}">← Previous</a>`:''}${page<totalPages?`<a class="badge" href="${makeHref(page+1)}">Next →</a>`:''}</div></div>`;
-    }
-    app.innerHTML=`<section><h2>${statusQ?statusQ[0].toUpperCase()+statusQ.slice(1)+' ':''}Shares</h2>${address?`<div class="muted">Address: ${addressLink(address)}</div>`:''}${s.length?table(headers,rows):'<div class="empty">No shares recorded.</div>'}${pager}</section>`;
+    const makeHref=p=>{const next=new URLSearchParams(q);if(p<=1)next.delete('page');else next.set('page',String(p));return '/shares'+(next.toString()?'?'+next.toString():'');};
+    const start=Math.max(1,Math.min(page-2,totalPages-4)),end=Math.min(totalPages,Math.max(5,page+2));
+    let numbers='';
+    for(let p=start;p<=end;p++) numbers+=`<a class="badge${p===page?' active':''}" href="${makeHref(p)}">${p}</a>`;
+    const pager=total?`<div class="yerb-pagination"><a class="badge${page<=1?' disabled':''}" href="${page>1?makeHref(page-1):'#'}">← Prev</a>${numbers}<a class="badge${page>=totalPages?' disabled':''}" href="${page<totalPages?makeHref(page+1):'#'}">Next →</a><span class="yerb-pagination-info">Page ${page} of ${totalPages} · ${total.toLocaleString()} results</span></div>`:'';
+    app.innerHTML=`<section><h2>${statusQ?statusQ[0].toUpperCase()+statusQ.slice(1)+' ':''}Shares</h2>${address?`<div class="muted">Address: ${addressLink(address)}</div>`:''}${workerQ?`<div class="muted">Worker #${esc(workerQ)}</div>`:''}${s.length?table(headers,rows):'<div class="empty">No shares recorded.</div>'}${pager}</section>`;
   };
 
   const appRoot=document.querySelector('main#app');
