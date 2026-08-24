@@ -11,6 +11,7 @@ from http.server import ThreadingHTTPServer
 from urllib.parse import unquote, urlparse
 
 import web_stats as live
+from yerbpool.coin_manager import deployment_plan, load_registry, save_coin
 from yerbpool.admin_settings import (
     YERB_ADDRESS_RE,
     ensure_treasury_address,
@@ -286,9 +287,10 @@ def _admin_html():
     return """<!doctype html>
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>YERB Pool Admin</title><link rel="stylesheet" href="/brand.css?v=1">
-<style>body{background:#111;color:#eee;font-family:system-ui,sans-serif;margin:0}main{max-width:1100px;margin:auto;padding:30px}.admin-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:14px}.admin-card{background:#1b1b1b;border:1px solid #303030;border-radius:10px;padding:18px}.admin-card strong{display:block;font-size:24px;margin-top:4px}.form-row{display:flex;gap:12px;align-items:end;flex-wrap:wrap}label{display:block;color:#aaa;font-size:13px;margin-bottom:6px}input{background:#111;color:#fff;border:1px solid #444;border-radius:7px;padding:10px 12px;font-size:16px;width:200px}.wide{width:min(520px,80vw)}button{background:#2b7a3d;color:#fff;border:0;border-radius:7px;padding:11px 18px;font-weight:700;cursor:pointer}.notice{margin-top:12px;color:#9fe3a7}.error{color:#ffaaaa}.muted{color:#aaa}a{color:#9fd3ff}table{width:100%;border-collapse:collapse;margin-top:12px}th,td{padding:9px;border-bottom:1px solid #2d2d2d;text-align:left;font-size:13px}code{word-break:break-all}.amount-positive{color:#9fe3a7}.amount-negative{color:#ffaaaa}.treasury-audit{margin-top:16px}.treasury-audit .admin-card strong{font-size:20px}</style></head>
+<style>body{background:#111;color:#eee;font-family:system-ui,sans-serif;margin:0}main{max-width:1100px;margin:auto;padding:30px}.admin-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:14px}.admin-card{background:#1b1b1b;border:1px solid #303030;border-radius:10px;padding:18px}.admin-card strong{display:block;font-size:24px;margin-top:4px}.form-row{display:flex;gap:12px;align-items:end;flex-wrap:wrap}label{display:block;color:#aaa;font-size:13px;margin-bottom:6px}input{box-sizing:border-box;background:#111;color:#fff;border:1px solid #444;border-radius:7px;padding:10px 12px;font-size:16px;width:200px}.wide{width:min(520px,80vw)}button{background:#2b7a3d;color:#fff;border:0;border-radius:7px;padding:11px 18px;font-weight:700;cursor:pointer}.secondary{background:#343434}.notice{margin-top:12px;color:#9fe3a7}.error{color:#ffaaaa}.muted{color:#aaa}a{color:#9fd3ff}table{width:100%;border-collapse:collapse;margin-top:12px}th,td{padding:9px;border-bottom:1px solid #2d2d2d;text-align:left;font-size:13px}code{word-break:break-all}.amount-positive{color:#9fe3a7}.amount-negative{color:#ffaaaa}.treasury-audit{margin-top:16px}.treasury-audit .admin-card strong{font-size:20px}.wizard-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:14px}.wizard-grid input{width:100%}#coin-plan{margin-top:16px}</style></head>
 <body><main><div style="display:flex;justify-content:space-between;align-items:center;gap:20px;flex-wrap:wrap"><div><h1 style="margin-bottom:4px">YERB Pool Admin</h1><div class="muted">Operational settings and pool treasury</div></div><a href="/">← Public dashboard</a></div>
 <section><h2>Pool status</h2><div class="admin-grid" id="status"><div class="admin-card">Loading…</div></div></section>
+<section><h2>Coins</h2><div class="admin-card"><div id="coin-list">Loading…</div><details style="margin-top:18px"><summary><strong>Add another coin</strong></summary><p class="muted">Create a validated draft and deployment preview. The current YERB instance is not modified.</p><div class="wizard-grid"><div><label>Name</label><input id="coin-name" placeholder="Example Coin"></div><div><label>Ticker</label><input id="coin-ticker" placeholder="EXM"></div><div><label>Slug</label><input id="coin-slug" placeholder="exm"></div><div><label>Algorithm</label><input id="coin-algorithm" placeholder="GhostRider"></div><div><label>Website domain</label><input id="coin-domain" placeholder="exm.pool.yerbas.org"></div><div><label>Explorer URL</label><input id="coin-explorer" placeholder="https://explorer.example.org"></div><div><label>Stratum port</label><input id="coin-stratum" type="number" value="3334"></div><div><label>Internal web port</label><input id="coin-web" type="number" value="8081"></div><div><label>RPC URL</label><input id="coin-rpc-url" value="http://127.0.0.1:8332"></div><div><label>RPC username</label><input id="coin-rpc-user"></div><div><label>RPC password</label><input id="coin-rpc-password" type="password"></div><div><label>Block maturity</label><input id="coin-maturity" type="number" value="100"></div><div><label>Minimum payout</label><input id="coin-minimum" value="1.00000000"></div><div><label>Pool fee %</label><input id="coin-fee" type="number" step="0.01" value="0"></div><div><label>Payout check seconds</label><input id="coin-payout-interval" type="number" value="7200"></div></div><button id="save-coin" style="margin-top:16px">Save coin draft</button><div id="coin-message"></div></details><div id="coin-plan"></div></div></section>
 <section><h2>Pool fee</h2><div class="admin-card"><div class="form-row"><div><label for="fee">Pool fee percent</label><input id="fee" type="number" min="0" max="100" step="0.01"></div><button id="save-fee">Save fee</button></div><p class="muted">Future pool fees are credited automatically to the internal Pool Treasury. Existing block allocations are never recalculated.</p><div id="fee-message"></div></div></section>
 <section><h2>Pool Treasury</h2><div class="admin-card"><div class="admin-grid"><div><span class="muted">Treasury Address</span><strong style="font-size:14px"><code id="treasury-address">—</code></strong></div><div><span class="muted">Current Spendable</span><strong id="treasury-balance">0.00 YERB</strong></div></div><div class="admin-grid treasury-audit" id="treasury-audit"><div class="admin-card">Loading accounting…</div></div><h3 style="margin-top:22px">Treasury Activity</h3><div class="muted">Fee credits and maturity transitions from the accounting ledger, combined with recorded treasury withdrawals.</div><div id="treasury-activity"></div><div class="form-row" style="margin-top:24px"><div><label for="withdraw-address">Withdraw to</label><input id="withdraw-address" class="wide" type="text" autocomplete="off" spellcheck="false" placeholder="Destination YERB address"></div><div><label for="withdraw-amount">Amount (YERB)</label><input id="withdraw-amount" type="number" min="0.00000001" step="0.00000001"></div><button id="withdraw">Withdraw</button></div><p class="muted">Withdrawals are signed and broadcast by the pool's Yerbas wallet. The treasury private key is never stored in the web application.</p><div id="withdraw-message"></div><h3 style="margin-top:22px">Withdrawal History</h3><div id="treasury-history"></div></div></section>
 <section><h2>Payout configuration</h2><div class="admin-grid" id="payouts"></div></section>
@@ -302,7 +304,7 @@ async function load(){const r=await fetch('/api/admin/settings',{cache:'no-store
 document.getElementById('save-fee').onclick=async()=>{const message=document.getElementById('fee-message');message.className='';message.textContent='Saving…';try{const fee=Number(document.getElementById('fee').value);const r=await fetch('/api/admin/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({pool_fee_percent:fee})});const x=await r.json();if(!r.ok)throw new Error(x.error||'Save failed');message.className='notice';message.textContent=`Pool fee updated to ${Number(x.pool_fee_percent).toFixed(2)}%. Applies to the next block.`;await load();}catch(e){message.className='error';message.textContent=e.message;}};
 document.getElementById('withdraw').onclick=async()=>{const message=document.getElementById('withdraw-message');message.className='';message.textContent='Broadcasting withdrawal…';try{const destination=document.getElementById('withdraw-address').value.trim();const amount=document.getElementById('withdraw-amount').value;const r=await fetch('/api/admin/treasury/withdraw',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({destination,amount})});const x=await r.json();if(!r.ok)throw new Error(x.error||'Withdrawal failed');message.className='notice';message.textContent=`Withdrawal sent. TXID: ${x.txid}`;document.getElementById('withdraw-amount').value='';await load();}catch(e){message.className='error';message.textContent=e.message;}};
 load().catch(e=>{document.getElementById('status').innerHTML=`<div class="admin-card error">${e.message}</div>`});
-</script></main></body></html>"""
+</script><script src="/admin_coins.js?v=1"></script></main></body></html>"""
 
 
 class AdminHandler(live.LiveHandler):
@@ -345,6 +347,16 @@ class AdminHandler(live.LiveHandler):
             if not self._require_admin():
                 return
             return self.send_json(_admin_snapshot())
+        if path == "/api/admin/coins":
+            if not self._require_admin():
+                return
+            return self.send_json({"coins": load_registry()})
+        if path.startswith("/api/admin/coins/") and path.endswith("/plan"):
+            if not self._require_admin():
+                return
+            slug = unquote(path[len("/api/admin/coins/"):-len("/plan")]).strip("/")
+            coin = next((item for item in load_registry() if item.get("slug") == slug), None)
+            return self.send_json(deployment_plan(coin)) if coin else self.send_json({"error": "coin not found"}, 404)
         return super().do_GET()
 
     def do_POST(self):
@@ -361,6 +373,8 @@ class AdminHandler(live.LiveHandler):
             if path == "/api/admin/treasury/withdraw":
                 txid = _withdraw_treasury(payload.get("destination"), payload.get("amount"))
                 return self.send_json({"ok": True, "txid": txid})
+            if path == "/api/admin/coins":
+                return self.send_json(save_coin(payload), 201)
             return self.send_error(404)
         except (ValueError, TypeError, json.JSONDecodeError, ArithmeticError) as exc:
             return self.send_json({"error": str(exc)}, 400)
