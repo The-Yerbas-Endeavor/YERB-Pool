@@ -190,11 +190,13 @@ def api_worker_stats(worker_id, hours=24, bucket_seconds=300):
     with base.db() as con:
         recent = base.one(con, """SELECT
                       COALESCE(SUM(CASE WHEN accepted=1 AND ts>=? THEN difficulty ELSE 0 END),0) accepted_diff,
-                      COALESCE(MAX(CASE WHEN accepted=1 THEN ts ELSE NULL END),0) last_share_at
+                      COALESCE(MAX(CASE WHEN accepted=1 THEN ts ELSE NULL END),0) last_share_at,
+                      COALESCE(MAX(CASE WHEN accepted=1 AND block_candidate=1 THEN ts ELSE NULL END),0) last_block_found_at
                FROM shares WHERE worker_id=?""", (cutoff, int(worker_id)))
     result["hashrate"] = _hashrate_from_diff(recent.get("accepted_diff"))
     result["recent_diff"] = float(recent.get("accepted_diff") or 0)
     result["last_share_at"] = int(recent.get("last_share_at") or 0)
+    result["last_block_found_at"] = int(recent.get("last_block_found_at") or 0)
     result["hashrate_window_seconds"] = HASHRATE_WINDOW
     result["active"] = max(int(result.get("last_seen_at") or 0), int(result.get("last_share_at") or 0)) >= cutoff
     return result
