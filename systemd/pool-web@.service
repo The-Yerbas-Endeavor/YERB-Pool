@@ -1,0 +1,19 @@
+[Unit]
+Description=Mining Pool Web Dashboard (%i)
+After=network.target pool@%i.service
+
+[Service]
+Type=simple
+User=%ipool
+Group=%ipool
+WorkingDirectory=/opt/%i-pool
+ExecStart=/usr/bin/python3 /opt/%i-pool/web_enhanced.py
+Restart=always
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/opt/%i-pool
+
+[Install]
+WantedBy=multi-user.target
