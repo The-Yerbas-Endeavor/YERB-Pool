@@ -135,35 +135,19 @@
     });
   }
 
-  async function payoutRecipients(batchId){
-    const miners=await get('/api/miners?limit=1000').catch(()=>[]);
-    const accounts=await Promise.all(miners.map(miner=>
-      get('/api/account/'+encodeURIComponent(miner.address)).catch(()=>null)
-    ));
-    const recipients=[];
-    for(const account of accounts){
-      if(!account) continue;
-      const item=(account.payouts||[]).find(p=>Number(p.id)===Number(batchId));
-      if(item) recipients.push({address:account.address,amount_atomic:Number(item.amount_atomic||0)});
-    }
-    recipients.sort((a,b)=>b.amount_atomic-a.amount_atomic || a.address.localeCompare(b.address));
-    return recipients;
-  }
-
   async function renderDetail(batchId){
     ensureStyles();
     const root=document.querySelector('main#app');
     if(!root) return;
     root.innerHTML='<section class="payout-detail"><a class="back" href="/payouts">← Payouts</a><div class="empty">Loading payout batch…</div></section>';
 
-    const payouts=await get('/api/payouts?limit=100').catch(()=>[]);
-    const batch=payouts.find(p=>Number(p.id)===Number(batchId));
+    const batch=await get('/api/payouts/'+encodeURIComponent(batchId)).catch(()=>null);
     if(!batch){
       root.innerHTML='<section class="payout-detail"><a class="back" href="/payouts">← Payouts</a><div class="empty bad">Payout batch not found.</div></section>';
       return;
     }
 
-    const recipients=await payoutRecipients(batchId);
+    const recipients=Array.isArray(batch.recipients)?batch.recipients:[];
     const recipientsTotal=recipients.reduce((sum,r)=>sum+Number(r.amount_atomic||0),0);
     const tx=batch.txid
       ? `<a href="${EXPLORER}/tx/${encodeURIComponent(batch.txid)}" target="_blank" rel="noopener"><code>${esc(batch.txid)}</code></a>`

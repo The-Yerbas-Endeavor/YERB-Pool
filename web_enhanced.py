@@ -38,7 +38,7 @@ if "/pool_status.js" not in admin.live.base.LUCK_SCRIPT:
 if "/block_presentation.js" not in admin.live.base.LUCK_SCRIPT:
     admin.live.base.LUCK_SCRIPT += '<script src="/block_presentation.js?v=1"></script>'
 if "/payout_presentation.js" not in admin.live.base.LUCK_SCRIPT:
-    admin.live.base.LUCK_SCRIPT += '<script src="/payout_presentation.js?v=3"></script>'
+    admin.live.base.LUCK_SCRIPT += '<script src="/payout_presentation.js?v=4"></script>'
 
 
 def effective_public_settings():
@@ -171,7 +171,7 @@ def api_blocks_enhanced(status=None, limit=100, offset=0):
 
 
 def api_payouts_enhanced(limit=100, offset=0):
-    """Return at most 100 payout batches with miner recipient counts."""
+    """Return one bounded page of payout batches with recipient counts."""
     with admin.live.base.db() as con:
         result = admin.live.base.rows(
             con,
@@ -193,6 +193,34 @@ def api_payouts_enhanced(limit=100, offset=0):
         if payout.get("txid"):
             payout["explorer_url"] = f"{explorer}/tx/{payout['txid']}"
     return result
+
+
+def api_payout_detail(payout_id):
+    """Return one payout batch and every recipient without a history cutoff."""
+    with admin.live.base.db() as con:
+        payout = admin.live.base.one(
+            con,
+            """SELECT p.id,p.created_at,p.sent_at,p.txid,p.total_atomic,
+                      p.fee_atomic,p.status,p.error,COUNT(pi.id) recipient_count
+               FROM payouts p LEFT JOIN payout_items pi ON pi.payout_id=p.id
+               WHERE p.id=? GROUP BY p.id""",
+            (int(payout_id),),
+        )
+        if not payout:
+            return None
+        payout["recipients"] = admin.live.base.rows(
+            con,
+            """SELECT address,amount_atomic FROM payout_items
+               WHERE payout_id=? ORDER BY amount_atomic DESC,address""",
+            (int(payout_id),),
+        )
+    explorer = str(admin.CFG.get("explorer_url", "https://explorer.yerbas.org")).rstrip("/")
+    payout["total"] = _coin_string(payout.get("total_atomic"))
+    payout["fee"] = _coin_string(payout.get("fee_atomic"))
+    payout["explorer_url"] = f"{explorer}/tx/{payout['txid']}" if payout.get("txid") else None
+    for recipient in payout["recipients"]:
+        recipient["amount"] = _coin_string(recipient.get("amount_atomic"))
+    return payout
 
 
 def _coin_string(value):
@@ -249,6 +277,7 @@ def api_help():
             {"method": "GET", "path": "/api/hashrate/chart", "parameters": "hours,bucket"},
             {"method": "GET", "path": "/api/v1/blocks", "parameters": "status,limit,offset"},
             {"method": "GET", "path": "/api/v1/payouts", "parameters": "limit,offset"},
+            {"method": "GET", "path": "/api/payouts/{id}", "description": "Payout batch and complete recipient list"},
             {"method": "GET", "path": "/api/v1/miners", "parameters": "limit,offset"},
             {"method": "GET", "path": "/api/v1/workers", "parameters": "limit,offset"},
             {"method": "GET", "path": "/api/v1/shares", "parameters": "status,address,limit,offset"},
@@ -713,6 +742,14 @@ class EnhancedHandler(admin.AdminHandler):
             except (TypeError, ValueError) as exc:
                 return self.send_json({"error": str(exc)}, 400)
             return self.send_json(result if result is not None else {"error": "worker not found"}, 200 if result is not None else 404)
+
+        if path.startswith("/api/payouts/"):
+            payout_id = unquote(path[len("/api/payouts/"):]).strip("/")
+            try:
+                result = api_payout_detail(payout_id)
+            except (TypeError, ValueError):
+                return self.send_json({"error": "invalid payout id"}, 400)
+            return self.send_json(result if result is not None else {"error": "payout not found"}, 200 if result is not None else 404)
 
         if path == "/api/health":
             return self.send_json(api_health())
