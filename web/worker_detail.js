@@ -2,6 +2,13 @@
   if(!location.pathname.startsWith('/worker/')) return;
 
   const workerId=location.pathname.slice('/worker/'.length).replace(/\/$/,'');
+  const WORKER_RANGES={
+    '1H':{hours:1,bucket:60,label:'1 hr'},
+    '6H':{hours:6,bucket:300,label:'6 hr'},
+    '12H':{hours:12,bucket:300,label:'12 hr'},
+    '24H':{hours:24,bucket:600,label:'24 hr'}
+  };
+  let workerRange='24H',workerRangeBusy=false;
 
   function reasonLabel(value){
     const text=String(value||'Unspecified').trim();
@@ -57,23 +64,58 @@
     return table(['Height','Status','Confirmations','Found'],rows.map(block=>`<tr><td><a href="${EXPLORER}/block/${encodeURIComponent(block.block_hash||block.height)}" target="_blank" rel="noopener">#${Number(block.height||0).toLocaleString()}</a></td><td>${status(block.status)}</td><td>${Number(block.confirmations||0).toLocaleString()}</td><td>${when(block.submitted_at)}</td></tr>`));
   }
 
+  function workerPerformance(history){
+    return `${history.length?workerChartSvg(history):'<div class="empty">No worker history recorded for this range.</div>'}<div class="hash-legend"><span><i class="hash-dot pool"></i>Worker hashrate</span><span><i class="dot okdot"></i>Accepted shares</span><span><i class="dot baddot"></i>Rejected shares</span></div>`;
+  }
+
+  function bindWorkerRanges(){
+    document.querySelectorAll('[data-worker-range]').forEach(button=>{
+      button.onclick=async()=>{
+        const key=button.dataset.workerRange;
+        if(workerRangeBusy||!WORKER_RANGES[key]||key===workerRange) return;
+        workerRangeBusy=true;
+        document.querySelectorAll('[data-worker-range]').forEach(item=>item.disabled=true);
+        try{
+          const range=WORKER_RANGES[key];
+          const next=await get(`/api/worker/${encodeURIComponent(workerId)}/stats?hours=${range.hours}&bucket=${range.bucket}`);
+          workerRange=key;
+          selectedHashRange=key;
+          document.querySelectorAll('[data-worker-range]').forEach(item=>item.classList.toggle('active',item.dataset.workerRange===key));
+          const history=Array.isArray(next.history)?next.history:[];
+          const card=document.getElementById('worker-hash-card');
+          if(card) card.innerHTML=workerPerformance(history);
+          const subtitle=document.getElementById('worker-performance-subtitle');
+          if(subtitle) subtitle.textContent=`Hashrate and accepted/rejected shares over the last ${range.label}.`;
+          if(history.length){
+            const data={history,pool_hashrate:Number(next.hashrate||0),network_hashrate:0};
+            bindHashChart(data,{cardId:'worker-hash-card',workerId:workerId});
+          }
+        } finally {
+          workerRangeBusy=false;
+          document.querySelectorAll('[data-worker-range]').forEach(item=>item.disabled=false);
+        }
+      };
+    });
+  }
+
   async function renderWorkerDetail(){
     ensureStyles();
     const x=await get(`/api/worker/${encodeURIComponent(workerId)}/detail?hours=24&bucket=600&share_limit=25`);
     const history=Array.isArray(x.history)?x.history:[];
     const accepted=Number(x.accepted_shares||0),rejected=Number(x.rejected_shares||0),total=accepted+rejected;
     const efficiency=total?accepted/total*100:100;
-    const rangeAccepted=Number(x.range_accepted_shares||0),rangeRejected=Number(x.range_rejected_shares||0),rangeTotal=rangeAccepted+rangeRejected;
     const chartData={history,pool_hashrate:Number(x.hashrate||0),network_hashrate:0};
-    const chart=history.length?workerChartSvg(history):'<div class="empty">No worker history recorded yet.</div>';
+    selectedHashRange=workerRange;
+    const chart=workerPerformance(history);
 
     app.innerHTML=`<a class="back" href="/workers">← Workers</a>
       <section class="worker-overview"><div class="section-head"><div><h2 style="margin-bottom:0">${esc(x.name)}</h2><div class="worker-detail-id small muted">Worker #${esc(x.id)} · First seen ${when(x.created_at)} · Last share ${ago(x.last_share_at)}</div><div style="margin-top:7px">${addressLink(x.address)} &nbsp; ${explorerAddress(x.address)}</div></div><div class="worker-status"><div>${x.active?'<span class="ok">● Active</span>':'<span class="muted">○ Idle</span>'}</div><div class="small muted" style="margin-top:5px">Last seen ${ago(x.last_seen_at)}</div></div></div>
-      <div class="grid" style="margin-top:18px"><div class="card"><div class="muted">Current Hashrate</div><div class="value">${hashRate(x.hashrate)}</div><div class="small muted">${Number(x.hashrate_window_seconds||120)}-second estimate</div></div><div class="card"><div class="muted">24h Average</div><div class="value">${hashRate(x.average_hashrate)}</div><div class="small muted">Includes idle periods</div></div><div class="card"><div class="muted">Accepted / Rejected</div><div class="value">${accepted.toLocaleString()} / ${rejected.toLocaleString()}</div><div class="small muted">${efficiency.toFixed(2)}% lifetime efficiency</div></div><div class="card"><div class="muted">Last Share Difficulty</div><div class="value">${x.last_share_difficulty==null?'—':Number(x.last_share_difficulty).toFixed(6)}</div><div class="small muted">Most recently submitted share</div></div><div class="card"><div class="muted">24h Shares</div><div class="value">${rangeAccepted.toLocaleString()} / ${rangeRejected.toLocaleString()}</div><div class="small muted">${rangeTotal?(rangeRejected/rangeTotal*100).toFixed(2):'0.00'}% rejected</div></div><div class="card"><div class="muted">Blocks Found</div><div class="value">${Number(x.blocks_found_total||0).toLocaleString()}</div><div class="small muted">Most recent ${Math.min(25,(x.blocks_found||[]).length)} shown below</div></div></div></section>
-      <section><div class="section-head"><div><h2 style="margin-bottom:4px">Worker Performance</h2><div class="muted">Hashrate and accepted/rejected shares over the last 24 hours.</div></div></div><div class="chart-card" id="worker-hash-card" style="margin-top:14px">${chart}<div class="hash-legend"><span><i class="hash-dot pool"></i>Worker hashrate</span><span><i class="dot okdot"></i>Accepted shares</span><span><i class="dot baddot"></i>Rejected shares</span></div></div></section>
+      <div class="grid" style="margin-top:18px"><div class="card"><div class="muted">Current Hashrate</div><div class="value">${hashRate(x.hashrate)}</div><div class="small muted">${Number(x.hashrate_window_seconds||120)}-second estimate</div></div><div class="card"><div class="muted">24h Average</div><div class="value">${hashRate(x.average_hashrate)}</div><div class="small muted">Includes idle periods</div></div><div class="card"><div class="muted">Accepted / Rejected</div><div class="value">${accepted.toLocaleString()} / ${rejected.toLocaleString()}</div><div class="small muted">${efficiency.toFixed(2)}% lifetime efficiency</div></div><div class="card"><div class="muted">Last Share Difficulty</div><div class="value">${x.last_share_difficulty==null?'—':Number(x.last_share_difficulty).toFixed(6)}</div><div class="small muted">Most recently submitted share</div></div><div class="card"><div class="muted">Blocks Found</div><div class="value">${Number(x.blocks_found_total||0).toLocaleString()}</div><div class="small muted">Most recent ${Math.min(25,(x.blocks_found||[]).length)} shown below</div></div></div></section>
+      <section><div class="section-head"><div><h2 style="margin-bottom:4px">Worker Performance</h2><div class="muted" id="worker-performance-subtitle">Hashrate and accepted/rejected shares over the last 24 hr.</div></div><div class="hash-range">${Object.entries(WORKER_RANGES).map(([key,range])=>`<button type="button" data-worker-range="${key}" class="${key===workerRange?'active':''}">${range.label}</button>`).join('')}</div></div><div class="chart-card" id="worker-hash-card" style="margin-top:14px">${chart}</div></section>
       <section><div class="section-head"><div><h2 style="margin-bottom:4px">Recent Shares</h2><div class="muted">Latest work submitted by this worker.</div></div><a href="/shares?address=${encodeURIComponent(x.address)}">All account shares →</a></div>${recentShares(x.recent_shares)}</section>
       <section><div class="section-head"><div><h2 style="margin-bottom:4px">Rejection Reasons</h2><div class="muted">Lifetime rejected shares for this worker.</div></div></div>${rejectionBreakdown(x.rejection_reasons)}</section>
       <section><div class="section-head"><div><h2 style="margin-bottom:4px">Blocks Found</h2><div class="muted">Blocks attributed to this worker.</div></div><a href="/blocks">All pool blocks →</a></div>${blocksFound(x.blocks_found)}</section>`;
+    bindWorkerRanges();
     if(history.length) bindHashChart(chartData,{cardId:'worker-hash-card',workerId:workerId});
   }
 
