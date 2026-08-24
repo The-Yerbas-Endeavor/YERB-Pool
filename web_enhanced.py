@@ -39,6 +39,8 @@ if "/block_presentation.js" not in admin.live.base.LUCK_SCRIPT:
     admin.live.base.LUCK_SCRIPT += '<script src="/block_presentation.js?v=1"></script>'
 if "/payout_presentation.js" not in admin.live.base.LUCK_SCRIPT:
     admin.live.base.LUCK_SCRIPT += '<script src="/payout_presentation.js?v=4"></script>'
+if "/worker_detail.js" not in admin.live.base.LUCK_SCRIPT:
+    admin.live.base.LUCK_SCRIPT += '<script src="/worker_detail.js?v=1"></script>'
 
 
 def effective_public_settings():
@@ -288,6 +290,7 @@ def api_help():
             {"method": "GET", "path": "/api/account/{address}/blocks", "parameters": "limit,offset"},
             {"method": "GET", "path": "/api/account/{address}/performance", "parameters": "hours,bucket"},
             {"method": "GET", "path": "/api/worker/{id}/performance", "parameters": "hours,bucket"},
+            {"method": "GET", "path": "/api/worker/{id}/detail", "parameters": "hours,bucket,share_limit"},
         ],
     }
 
@@ -482,6 +485,67 @@ def api_performance(address=None, worker_id=None, hours=24, bucket_seconds=600):
         })
         cursor += bucket_seconds
     return {"hours": hours, "bucket_seconds": bucket_seconds, "history": history, "generated_at": now}
+
+
+def api_worker_detail(worker_id, hours=24, bucket_seconds=600, share_limit=25):
+    """Return the complete public worker view in one bounded response."""
+    worker_id = int(worker_id)
+    share_limit = _bounded_int(share_limit, 25, 1, 100)
+    result = admin.live.api_worker_stats(worker_id, hours, bucket_seconds)
+    if result is None:
+        return None
+
+    with admin.live.base.db() as con:
+        columns = {row[1] for row in con.execute("PRAGMA table_info(shares)")}
+        reason_expr = "s.rejection_reason" if "rejection_reason" in columns else "NULL AS rejection_reason"
+        result["recent_shares"] = admin.live.base.rows(
+            con,
+            f"""SELECT s.id,s.ts,s.difficulty,s.accepted,s.block_candidate,s.hash,
+                       {reason_expr}
+                FROM shares s WHERE s.worker_id=? ORDER BY s.id DESC LIMIT ?""",
+            (worker_id, share_limit),
+        )
+        if "rejection_reason" in columns:
+            reasons = admin.live.base.rows(
+                con,
+                """SELECT COALESCE(NULLIF(TRIM(rejection_reason),''),'Unspecified') reason,
+                          COUNT(*) count
+                   FROM shares WHERE worker_id=? AND accepted=0
+                   GROUP BY COALESCE(NULLIF(TRIM(rejection_reason),''),'Unspecified')
+                   ORDER BY count DESC,reason""",
+                (worker_id,),
+            )
+        else:
+            rejected = admin.live.base.one(
+                con,
+                "SELECT COUNT(*) count FROM shares WHERE worker_id=? AND accepted=0",
+                (worker_id,),
+            )
+            reasons = [{"reason": "Unspecified", "count": int(rejected.get("count") or 0)}] if rejected.get("count") else []
+        result["rejection_reasons"] = reasons
+        result["blocks_found"] = admin.live.base.rows(
+            con,
+            """SELECT id,height,block_hash,status,confirmations,submitted_at
+               FROM blocks WHERE finder_worker_id=? ORDER BY id DESC LIMIT 25""",
+            (worker_id,),
+        )
+        result["blocks_found_total"] = int(admin.live.base.one(
+            con,
+            "SELECT COUNT(*) count FROM blocks WHERE finder_worker_id=?",
+            (worker_id,),
+        ).get("count") or 0)
+
+    history = result.get("history") or []
+    result["average_hashrate"] = (
+        sum(float(row.get("hashrate") or 0) for row in history) / len(history)
+        if history else 0.0
+    )
+    result["range_accepted_shares"] = sum(int(row.get("accepted") or 0) for row in history)
+    result["range_rejected_shares"] = sum(int(row.get("rejected") or 0) for row in history)
+    latest_share = result["recent_shares"][0] if result["recent_shares"] else None
+    result["last_share_difficulty"] = float(latest_share.get("difficulty") or 0) if latest_share else None
+    result["generated_at"] = int(time.time())
+    return result
 
 
 def api_v1_list(resource, query):
@@ -739,6 +803,19 @@ class EnhancedHandler(admin.AdminHandler):
             worker_id = unquote(path[len("/api/worker/"):-len("/performance")]).strip("/")
             try:
                 result = api_performance(worker_id=worker_id, hours=(query.get("hours") or [24])[0], bucket_seconds=(query.get("bucket") or [600])[0])
+            except (TypeError, ValueError) as exc:
+                return self.send_json({"error": str(exc)}, 400)
+            return self.send_json(result if result is not None else {"error": "worker not found"}, 200 if result is not None else 404)
+
+        if path.startswith("/api/worker/") and path.endswith("/detail"):
+            worker_id = unquote(path[len("/api/worker/"):-len("/detail")]).strip("/")
+            try:
+                result = api_worker_detail(
+                    worker_id,
+                    (query.get("hours") or [24])[0],
+                    (query.get("bucket") or [600])[0],
+                    (query.get("share_limit") or [25])[0],
+                )
             except (TypeError, ValueError) as exc:
                 return self.send_json({"error": str(exc)}, 400)
             return self.send_json(result if result is not None else {"error": "worker not found"}, 200 if result is not None else 404)
