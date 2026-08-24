@@ -198,8 +198,14 @@ Miner-specific API routes:
 /api/account/{address}/blocks
 /api/account/{address}/performance?hours=24&bucket=600
 /api/worker/{id}/performance?hours=24&bucket=600
+/api/worker/{id}/detail?hours=24&bucket=600&share_limit=25
 /api/payouts/{id}
 ```
+
+Worker detail responses combine identity and live hashrate data with range
+averages, recent shares, rejection reasons, and blocks attributed to that
+worker. The public worker page renders these diagnostics around the existing
+performance chart.
 
 The public Payouts page uses server-side pagination and can browse the complete
 payout history. Individual payout-detail responses include the complete

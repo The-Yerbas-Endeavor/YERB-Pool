@@ -100,6 +100,22 @@ class PublicApiTest(unittest.TestCase):
         self.assertEqual(result["bucket_seconds"], 300)
         self.assertEqual(len(result["history"]), 13)
 
+    def test_worker_detail_includes_shares_rejections_and_blocks(self):
+        with self.db._connect() as con:
+            rig1 = con.execute("SELECT id FROM workers WHERE name='rig1'").fetchone()[0]
+            rig2 = con.execute("SELECT id FROM workers WHERE name='rig2'").fetchone()[0]
+
+        detail = api.api_worker_detail(rig1, hours=1, bucket_seconds=300, share_limit=10)
+        self.assertEqual(detail["name"], "rig1")
+        self.assertEqual(len(detail["recent_shares"]), 2)
+        self.assertEqual(detail["rejection_reasons"][0]["reason"], "Unspecified")
+        self.assertEqual(detail["blocks_found_total"], 0)
+        self.assertIsNotNone(detail["last_share_difficulty"])
+
+        finder = api.api_worker_detail(rig2, hours=1, bucket_seconds=300, share_limit=10)
+        self.assertEqual(finder["blocks_found_total"], 1)
+        self.assertEqual(finder["blocks_found"][0]["height"], 1000)
+
 
 if __name__ == "__main__":
     unittest.main()
