@@ -80,6 +80,11 @@ class PublicApiTest(unittest.TestCase):
         self.assertEqual(blocks["pagination"]["total"], 1)
         self.assertEqual(blocks["items"][0]["height"], 1000)
 
+        detail = api.api_payout_detail(payments["items"][0]["id"])
+        self.assertEqual(detail["recipient_count"], 1)
+        self.assertEqual(detail["recipients"][0]["address"], "yMinerA")
+        self.assertEqual(detail["recipients"][0]["amount"], "2.98500000")
+
     def test_v1_share_pagination_and_help(self):
         page = api.api_v1_list("shares", {"status": ["accepted"], "limit": ["1"], "offset": ["0"]})
         self.assertEqual(page["pagination"]["total"], 2)

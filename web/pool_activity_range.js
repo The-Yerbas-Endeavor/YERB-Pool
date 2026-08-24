@@ -52,6 +52,7 @@
   const PAGE_SIZE=25;
   let currentPage=Math.max(1,parseInt(new URLSearchParams(location.search).get('page')||'1',10)||1);
   let rows=[];
+  let totalRows=0;
   let loading=false;
 
   function ensureStyles(){
@@ -90,13 +91,14 @@
   }
 
   function render(){
-    const totalPages=Math.max(1,Math.ceil(rows.length/PAGE_SIZE));
+    const count=isPayouts?totalRows:rows.length;
+    const totalPages=Math.max(1,Math.ceil(count/PAGE_SIZE));
     currentPage=Math.min(currentPage,totalPages);
     const start=(currentPage-1)*PAGE_SIZE;
-    const items=rows.slice(start,start+PAGE_SIZE);
+    const items=isPayouts?rows:rows.slice(start,start+PAGE_SIZE);
     const title=path==='/blocks/pending'?'Pending Blocks':isBlocks?'Blocks':'Payouts';
     const body=isBlocks?renderBlocks(items):renderPayouts(items);
-    app.innerHTML=`<section><h2>${title}</h2>${body}${pager(currentPage,totalPages,rows.length)}</section>`;
+    app.innerHTML=`<section><h2>${title}</h2>${body}${pager(currentPage,totalPages,count)}</section>`;
     updateUrl(currentPage);
   }
 
@@ -108,8 +110,18 @@
       if(isBlocks){
         const pending=path==='/blocks/pending';
         rows=await get('/api/blocks?limit=500'+(pending?'&status=pending':''));
+        totalRows=rows.length;
       }else{
-        rows=await get('/api/payouts?limit=100');
+        const offset=(currentPage-1)*PAGE_SIZE;
+        const page=await get(`/api/v1/payouts?limit=${PAGE_SIZE}&offset=${offset}`);
+        rows=Array.isArray(page.items)?page.items:[];
+        totalRows=Number(page.pagination?.total||rows.length);
+        const lastPage=Math.max(1,Math.ceil(totalRows/PAGE_SIZE));
+        if(currentPage>lastPage){
+          currentPage=lastPage;
+          loading=false;
+          return load();
+        }
       }
       render();
     }catch(e){
@@ -125,7 +137,8 @@
     const page=parseInt(button.dataset.page||'1',10);
     if(!Number.isFinite(page)||page<1) return;
     currentPage=page;
-    render();
+    if(isPayouts) load();
+    else render();
     window.scrollTo({top:0,behavior:'smooth'});
   });
 

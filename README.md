@@ -198,7 +198,12 @@ Miner-specific API routes:
 /api/account/{address}/blocks
 /api/account/{address}/performance?hours=24&bucket=600
 /api/worker/{id}/performance?hours=24&bucket=600
+/api/payouts/{id}
 ```
+
+The public Payouts page uses server-side pagination and can browse the complete
+payout history. Individual payout-detail responses include the complete
+recipient list for that batch.
 
 Local accounting reconciliation:
 
