@@ -59,6 +59,19 @@ def load_config(path=DEFAULT_PATH):
     payouts.setdefault("pool_fee_percent", 0.0)
     payouts.setdefault("transaction_fee_reserve", "0.01000000")
 
+    coin = cfg.setdefault("coin", {})
+    coin.setdefault("name", "Yerbas")
+    coin.setdefault("ticker", "YERB")
+    coin.setdefault("symbol", coin["ticker"])
+    coin.setdefault("algorithm", "ghostrider")
+    coin.setdefault("adapter", "yerbas")
+    coin.setdefault("domain", "pool.yerbas.org")
+    coin.setdefault("explorer_url", cfg.get("explorer_url", "https://explorer.yerbas.org"))
+    coin.setdefault("decimals", 8)
+
+    from yerbpool.coins import get_adapter
+    get_adapter(cfg)
+
     cfg.setdefault("template_refresh_seconds", 5)
     cfg.setdefault("log_level", "INFO")
 
