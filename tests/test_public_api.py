@@ -99,6 +99,13 @@ class PublicApiTest(unittest.TestCase):
         self.assertIn("/api/v1/shares", paths)
         self.assertIn("/api/account/{address}/earnings/daily", paths)
 
+    def test_v1_block_pagination(self):
+        page = api.api_v1_list("blocks", {"limit": ["1"], "offset": ["0"]})
+        self.assertEqual(page["pagination"]["total"], 1)
+        self.assertEqual(page["pagination"]["limit"], 1)
+        self.assertEqual(len(page["items"]), 1)
+        self.assertEqual(page["items"][0]["height"], 1000)
+
     def test_performance_returns_bounded_history(self):
         result = api.api_performance(address="yMinerA", hours=1, bucket_seconds=300)
         self.assertEqual(result["hours"], 1)
