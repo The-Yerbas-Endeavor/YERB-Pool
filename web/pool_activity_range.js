@@ -91,13 +91,11 @@
   }
 
   function render(){
-    const count=isPayouts?totalRows:rows.length;
+    const count=totalRows;
     const totalPages=Math.max(1,Math.ceil(count/PAGE_SIZE));
     currentPage=Math.min(currentPage,totalPages);
-    const start=(currentPage-1)*PAGE_SIZE;
-    const items=isPayouts?rows:rows.slice(start,start+PAGE_SIZE);
     const title=path==='/blocks/pending'?'Pending Blocks':isBlocks?'Blocks':'Payouts';
-    const body=isBlocks?renderBlocks(items):renderPayouts(items);
+    const body=isBlocks?renderBlocks(rows):renderPayouts(rows);
     app.innerHTML=`<section><h2>${title}</h2>${body}${pager(currentPage,totalPages,count)}</section>`;
     updateUrl(currentPage);
   }
@@ -107,21 +105,22 @@
     loading=true;
     ensureStyles();
     try{
+      const offset=(currentPage-1)*PAGE_SIZE;
       if(isBlocks){
         const pending=path==='/blocks/pending';
-        rows=await get('/api/blocks?limit=500'+(pending?'&status=pending':''));
-        totalRows=rows.length;
+        const page=await get(`/api/v1/blocks?limit=${PAGE_SIZE}&offset=${offset}${pending?'&status=pending':''}`);
+        rows=Array.isArray(page.items)?page.items:[];
+        totalRows=Number(page.pagination?.total||rows.length);
       }else{
-        const offset=(currentPage-1)*PAGE_SIZE;
         const page=await get(`/api/v1/payouts?limit=${PAGE_SIZE}&offset=${offset}`);
         rows=Array.isArray(page.items)?page.items:[];
         totalRows=Number(page.pagination?.total||rows.length);
-        const lastPage=Math.max(1,Math.ceil(totalRows/PAGE_SIZE));
-        if(currentPage>lastPage){
-          currentPage=lastPage;
-          loading=false;
-          return load();
-        }
+      }
+      const lastPage=Math.max(1,Math.ceil(totalRows/PAGE_SIZE));
+      if(currentPage>lastPage){
+        currentPage=lastPage;
+        loading=false;
+        return load();
       }
       render();
     }catch(e){
@@ -137,8 +136,7 @@
     const page=parseInt(button.dataset.page||'1',10);
     if(!Number.isFinite(page)||page<1) return;
     currentPage=page;
-    if(isPayouts) load();
-    else render();
+    load();
     window.scrollTo({top:0,behavior:'smooth'});
   });
 
