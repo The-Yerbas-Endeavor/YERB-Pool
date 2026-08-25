@@ -66,6 +66,12 @@
     return `<span title="${esc(when(x.submitted_at))}">${ago(x.submitted_at)}</span><div class="small muted">${when(x.submitted_at)}</div>`;
   }
 
+  function heightHtml(x){
+    if(x.height===undefined || x.height===null) return '<span class="muted">—</span>';
+    const blockRef=x.block_hash||x.height;
+    return `<a href="${EXPLORER}/block/${encodeURIComponent(blockRef)}" target="_blank" rel="noopener"><strong>${Number(x.height).toLocaleString()}</strong></a>`;
+  }
+
   function fullTable(blocks){
     const shown=blocks.slice(0,PAGE_BLOCK_LIMIT);
     if(!shown.length) return '<div class="empty">No blocks found yet.</div>';
@@ -74,7 +80,7 @@
       shown.map(x=>{
         const state=blockState(x);
         return `<tr>
-          <td><strong>${x.height??'—'}</strong></td>
+          <td>${heightHtml(x)}</td>
           <td>${foundHtml(x)}</td>
           <td><span class="block-status ${state.cls}">${state.label}</span></td>
           <td>${progressHtml(x)}</td>
@@ -93,7 +99,7 @@
       blocks.map(x=>{
         const state=blockState(x);
         return `<tr>
-          <td><strong>${x.height??'—'}</strong><div class="small muted">${x.submitted_at?ago(x.submitted_at):''}</div></td>
+          <td>${heightHtml(x)}<div class="small muted">${x.submitted_at?ago(x.submitted_at):''}</div></td>
           <td><span class="block-status ${state.cls}">${state.label}</span></td>
           <td>${progressHtml(x)}</td>
           <td>${finderHtml(x,true)}</td>
