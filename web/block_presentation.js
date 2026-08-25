@@ -130,18 +130,7 @@
         return;
       }
 
-      if(location.pathname==='/blocks' || location.pathname==='/blocks/pending'){
-        const pending=location.pathname==='/blocks/pending';
-        const heading=[...document.querySelectorAll('main#app h2')]
-          .find(h=>h.textContent.trim()===(pending?'Pending Blocks':'Blocks'));
-        const section=heading?.closest('section');
-        if(!section) return;
-        const blocks=await get('/api/blocks?limit='+PAGE_BLOCK_LIMIT+(pending?'&status=pending':''));
-        const old=section.querySelector('.table-wrap,.empty');
-        const holder=document.createElement('div');
-        holder.innerHTML=fullTable(blocks);
-        if(old) old.replaceWith(holder.firstElementChild);
-      }
+      // Full block pages are populated by the server-backed pagination layer.
     }catch(e){}
   }
 
