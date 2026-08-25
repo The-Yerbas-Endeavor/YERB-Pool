@@ -34,13 +34,13 @@ class PreloadedControlHandler(controls.ControlHandler):
         text = text.replace(
             "let selectedHashRange='24H';",
             "let selectedHashRange='24H';\n"
-            "let dashboardHashContext={poolBalanceAtomic:0,immatureAtomic:0,totalPaidAtomic:0,miners:0,etaSeconds:null};",
+            "let dashboardHashContext={poolBalanceAtomic:0,immatureAtomic:0,totalPaidAtomic:0,miners:0,etaSeconds:null,lastBlockAt:0,lastBlockHeight:null};",
             1,
         )
         text = text.replace(
             "const current=w.reduce((n,x)=>n+Number(x.active?x.hashrate:0),0),poolNow=Number(hash?.pool_hashrate||luck?.pool_hashrate||current);const cards=",
             "const current=w.reduce((n,x)=>n+Number(x.active?x.hashrate:0),0),poolNow=Number(hash?.pool_hashrate||luck?.pool_hashrate||current);"
-            "dashboardHashContext={poolBalanceAtomic:Number(s.accounts.balance_atomic||0),immatureAtomic:Number(s.accounts.immature_atomic||0),totalPaidAtomic:Number(s.payouts.paid_atomic||0),miners:Number(s.accounts.accounts||0),etaSeconds:luck?.eta_seconds??null};"
+            "dashboardHashContext={poolBalanceAtomic:Number(s.accounts.balance_atomic||0),immatureAtomic:Number(s.accounts.immature_atomic||0),totalPaidAtomic:Number(s.payouts.paid_atomic||0),miners:Number(s.accounts.accounts||0),etaSeconds:luck?.eta_seconds??null,lastBlockAt:Number(b?.[0]?.submitted_at||0),lastBlockHeight:b?.[0]?.height??null};"
             "const cards=",
             1,
         )
@@ -191,14 +191,14 @@ class PreloadedControlHandler(controls.ControlHandler):
             '<div class="hash-metric"><span>Pool share</span><strong>${share.toFixed(2)}%</strong><small>of current network hash</small></div>'
             + balance_metric +
             '<div class="hash-metric"><span>Miners</span><strong>${Number(dashboardHashContext.miners||0).toLocaleString()}</strong><small>tracked payout addresses</small></div>'
-            '<div class="hash-metric"><span>Estimated block time</span><strong>${fmtTime(dashboardHashContext.etaSeconds)}</strong><small>at current pool hashrate</small></div>'
+            '<div class="hash-metric"><span>Block ETA / Last found</span><strong>${fmtTime(dashboardHashContext.etaSeconds)} / ${dashboardHashContext.lastBlockAt?ago(dashboardHashContext.lastBlockAt):\'never\'}</strong><small>${dashboardHashContext.lastBlockHeight!=null?`latest pool block #${Number(dashboardHashContext.lastBlockHeight).toLocaleString()}`:\'no pool block found\'}</small></div>'
             '</div>'
         )
         text = text.replace(old_metrics, new_metrics, 1)
         text = re.sub(r'<div class="hash-metric"><span>Peak pool</span>.*?</div>', balance_metric, text, count=1)
         text = re.sub(
             r'<div class="hash-metric"><span>Peak network</span>.*?</div>',
-            '<div class="hash-metric"><span>Miners</span><strong>${Number(dashboardHashContext.miners||0).toLocaleString()}</strong><small>tracked payout addresses</small></div><div class="hash-metric"><span>Estimated block time</span><strong>${fmtTime(dashboardHashContext.etaSeconds)}</strong><small>at current pool hashrate</small></div>',
+            '<div class="hash-metric"><span>Miners</span><strong>${Number(dashboardHashContext.miners||0).toLocaleString()}</strong><small>tracked payout addresses</small></div><div class="hash-metric"><span>Block ETA / Last found</span><strong>${fmtTime(dashboardHashContext.etaSeconds)} / ${dashboardHashContext.lastBlockAt?ago(dashboardHashContext.lastBlockAt):\'never\'}</strong><small>${dashboardHashContext.lastBlockHeight!=null?`latest pool block #${Number(dashboardHashContext.lastBlockHeight).toLocaleString()}`:\'no pool block found\'}</small></div>',
             text,
             count=1,
         )
