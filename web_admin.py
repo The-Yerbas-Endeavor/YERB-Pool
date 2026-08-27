@@ -3,11 +3,16 @@ import base64
 import hashlib
 import hmac
 import json
+import os
+import re
+import secrets
 import sqlite3
+import threading
 import time
 from decimal import Decimal
 from html import escape
 from http.server import ThreadingHTTPServer
+from pathlib import Path
 from urllib.parse import unquote, urlparse
 
 import web_stats as live
@@ -24,6 +29,8 @@ from yerbpool.rpc import YerbasRPC
 CFG = live.base.CFG
 COIN = 100_000_000
 live.base.LUCK_SCRIPT += '<script src="/account_live_hashrate.js?v=1"></script>'
+ADMIN_USERNAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{2,31}$")
+_admin_config_lock = threading.Lock()
 
 
 def _verify_password(password, spec):
@@ -39,27 +46,133 @@ def _verify_password(password, spec):
     return hmac.compare_digest(actual, expected)
 
 
+def _hash_password(password, iterations=310000):
+    salt = secrets.token_bytes(16)
+    digest = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, iterations)
+    return {
+        "scheme": "pbkdf2_sha256",
+        "iterations": iterations,
+        "salt": salt.hex(),
+        "hash": digest.hex(),
+    }
+
+
 def _admin_config():
     return CFG.get("admin", {})
 
 
 def _admin_enabled():
     admin = _admin_config()
-    return bool(admin.get("username") and admin.get("password_hash"))
+    return bool(_admin_accounts())
 
 
-def _authorized(header):
-    if not _admin_enabled() or not header or not header.startswith("Basic "):
-        return False
+def _admin_accounts():
+    admin = _admin_config()
+    accounts = []
+    if admin.get("username") and admin.get("password_hash"):
+        accounts.append({
+            "username": str(admin["username"]),
+            "password_hash": admin["password_hash"],
+            "role": "owner",
+            "enabled": True,
+            "legacy_owner": True,
+        })
+    for entry in admin.get("users", []):
+        if not isinstance(entry, dict) or not entry.get("username") or not entry.get("password_hash"):
+            continue
+        accounts.append({
+            "username": str(entry["username"]),
+            "password_hash": entry["password_hash"],
+            "role": "admin",
+            "enabled": bool(entry.get("enabled", True)),
+            "created_at": int(entry.get("created_at") or 0),
+            "legacy_owner": False,
+        })
+    return accounts
+
+
+def _authenticate(header):
+    if not header or not header.startswith("Basic "):
+        return None
     try:
         raw = base64.b64decode(header[6:], validate=True).decode("utf-8")
         username, password = raw.split(":", 1)
     except Exception:
-        return False
-    admin = _admin_config()
-    return hmac.compare_digest(username, str(admin.get("username", ""))) and _verify_password(
-        password, admin.get("password_hash")
-    )
+        return None
+    for account in _admin_accounts():
+        if not account.get("enabled"):
+            continue
+        if hmac.compare_digest(username, account["username"]) and _verify_password(password, account["password_hash"]):
+            return {key: value for key, value in account.items() if key != "password_hash"}
+    return None
+
+
+def _authorized(header):
+    return _authenticate(header) is not None
+
+
+def _persist_admin_config():
+    config_path = Path("config.json")
+    if not config_path.exists():
+        raise RuntimeError("config.json not found")
+    disk = json.loads(config_path.read_text(encoding="utf-8"))
+    disk["admin"] = _admin_config()
+    temp_path = config_path.with_name(config_path.name + ".tmp")
+    temp_path.write_text(json.dumps(disk, indent=2) + "\n", encoding="utf-8")
+    os.chmod(temp_path, 0o600)
+    temp_path.replace(config_path)
+
+
+def list_admin_users():
+    return [
+        {key: value for key, value in account.items() if key != "password_hash"}
+        for account in _admin_accounts()
+    ]
+
+
+def add_admin_user(username, password):
+    username = str(username or "").strip()
+    password = str(password or "")
+    if not ADMIN_USERNAME_RE.fullmatch(username):
+        raise ValueError("Username must be 3–32 characters using letters, numbers, dot, dash or underscore")
+    if len(password) < 12:
+        raise ValueError("Password must be at least 12 characters")
+    with _admin_config_lock:
+        if any(account["username"].casefold() == username.casefold() for account in _admin_accounts()):
+            raise ValueError("Administrator username already exists")
+        users = _admin_config().setdefault("users", [])
+        users.append({
+            "username": username,
+            "password_hash": _hash_password(password),
+            "enabled": True,
+            "created_at": int(time.time()),
+        })
+        _persist_admin_config()
+    return username
+
+
+def update_admin_user(username, password=None, enabled=None, delete=False):
+    username = str(username or "").strip()
+    owner = str(_admin_config().get("username") or "")
+    if hmac.compare_digest(username, owner):
+        raise ValueError("The owner account is managed with set-admin-password.py")
+    with _admin_config_lock:
+        users = _admin_config().setdefault("users", [])
+        entry = next((item for item in users if str(item.get("username", "")) == username), None)
+        if entry is None:
+            raise ValueError("Administrator not found")
+        if delete:
+            users.remove(entry)
+        else:
+            if password is not None:
+                password = str(password)
+                if len(password) < 12:
+                    raise ValueError("Password must be at least 12 characters")
+                entry["password_hash"] = _hash_password(password)
+            if enabled is not None:
+                entry["enabled"] = bool(enabled)
+        _persist_admin_config()
+    return username
 
 
 def _rpc():
@@ -306,14 +419,26 @@ load().catch(e=>{document.getElementById('status').innerHTML=`<div class="admin-
 
 
 class AdminHandler(live.LiveHandler):
+    def _admin_identity(self):
+        return _authenticate(self.headers.get("Authorization"))
+
     def _require_admin(self):
-        if _authorized(self.headers.get("Authorization")):
+        if self._admin_identity():
             return True
         self.send_response(401)
         self.send_header("WWW-Authenticate", 'Basic realm="YERB Pool Admin", charset="UTF-8"')
         self.send_header("Cache-Control", "no-store")
         self.end_headers()
         return False
+
+    def _require_owner(self):
+        identity = self._admin_identity()
+        if identity and identity.get("role") == "owner":
+            return identity
+        if identity:
+            return self.send_json({"error": "Owner access is required"}, 403)
+        self._require_admin()
+        return None
 
     def _send_html(self, text, status=200):
         body = text.encode("utf-8")

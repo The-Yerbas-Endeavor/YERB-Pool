@@ -2,6 +2,8 @@ import json
 import csv
 import io
 import os
+import base64
+import copy
 import tempfile
 import unittest
 from pathlib import Path
@@ -161,6 +163,32 @@ class PublicApiTest(unittest.TestCase):
         )))
         self.assertEqual(len(public_rows), 2)
         self.assertEqual(len(lifetime_rows), 3)
+
+    def test_multiple_admin_accounts_authenticate_and_can_be_managed(self):
+        original_admin = copy.deepcopy(api.admin.CFG.get("admin"))
+        original_cwd = os.getcwd()
+        try:
+            with tempfile.TemporaryDirectory() as directory:
+                os.chdir(directory)
+                owner_hash = api.admin._hash_password("owner-password-123")
+                api.admin.CFG["admin"] = {"username": "owner", "password_hash": owner_hash}
+                with open("config.json", "w", encoding="utf-8") as handle:
+                    json.dump({"admin": api.admin.CFG["admin"]}, handle)
+                api.admin.add_admin_user("operator", "operator-password-123")
+                header = "Basic " + base64.b64encode(b"operator:operator-password-123").decode()
+                identity = api.admin._authenticate(header)
+                self.assertEqual(identity["username"], "operator")
+                self.assertEqual(identity["role"], "admin")
+                api.admin.update_admin_user("operator", enabled=False)
+                self.assertIsNone(api.admin._authenticate(header))
+                api.admin.update_admin_user("operator", delete=True)
+                self.assertEqual(len(api.admin.list_admin_users()), 1)
+        finally:
+            os.chdir(original_cwd)
+            if original_admin is None:
+                api.admin.CFG.pop("admin", None)
+            else:
+                api.admin.CFG["admin"] = original_admin
 
     def test_performance_returns_bounded_history(self):
         result = api.api_performance(address="yMinerA", hours=1, bucket_seconds=300)

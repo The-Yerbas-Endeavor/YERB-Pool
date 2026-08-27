@@ -119,6 +119,15 @@ def _inject_user_admin(html):
 #admin-users{margin-top:14px}.user-toolbar{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:10px}.user-toolbar input{width:min(520px,80vw)}.admin-user-table-wrap{overflow-x:auto}.admin-user-table{min-width:2350px}.admin-user-table td{vertical-align:top;white-space:nowrap}.admin-user-table td.user-address,.admin-user-table td.user-ips{white-space:normal}.user-small{font-size:11px;margin-top:4px}.admin-ip{margin-bottom:10px}.user-badge{display:inline-block;padding:3px 7px;border-radius:999px;border:1px solid #444;font-size:11px;font-weight:700}.user-ok{color:#9fe3a7;border-color:#376c41;background:#152719}.user-paused{color:#ffe08a;border-color:#6d5d2b;background:#29240f}.user-banned,.user-suspended{color:#ffaaaa;border-color:#7b3737;background:#2b1515}.user-control-btn,.user-mini-btn{padding:6px 9px;font-size:11px}.user-mini-btn{margin-left:6px}.danger{background:#8a3434}button:disabled{opacity:.55;cursor:wait}
 </style><script src="/admin_users.js?v=3"></script>'''
         html = html.replace("</body>", extra + "</body>")
+    if 'id="admin-access-users"' not in html:
+        access_section = (
+            '<section id="admin-access-users"><div><h2 style="margin-bottom:4px">Admin access</h2>'
+            '<div class="muted">Add or manage people who can sign in to this Admin panel.</div></div>'
+            '<div id="admin-access-content" style="margin-top:14px"><div class="admin-card">Loading administrators…</div></div></section>'
+        )
+        html = html.replace('<section><h2>Payout configuration</h2>', access_section + '<section><h2>Payout configuration</h2>')
+    if "/admin_access.js" not in html:
+        html = html.replace("</body>", '<script src="/admin_access.js?v=1"></script></body>')
     return html
 
 
@@ -163,6 +172,16 @@ class ControlHandler(enhanced.EnhancedHandler):
                 return self.send_json(_users_snapshot())
             except Exception as exc:
                 return self.send_json({"error": str(exc)}, 500)
+        if path == "/api/admin/access/users":
+            identity = self._admin_identity()
+            if not identity:
+                self._require_admin()
+                return
+            return self.send_json({
+                "current_user": identity.get("username"),
+                "can_manage": identity.get("role") == "owner",
+                "users": enhanced.admin.list_admin_users() if identity.get("role") == "owner" else [],
+            })
         if path.startswith("/api/admin/export/account/") and path.endswith(".csv"):
             if not self._require_admin():
                 return
@@ -183,6 +202,28 @@ class ControlHandler(enhanced.EnhancedHandler):
 
     def do_POST(self):
         path = urlparse(self.path).path.rstrip("/") or "/"
+        if path == "/api/admin/access/users":
+            if not self._require_owner():
+                return
+            try:
+                payload = self._read_json()
+                action = str(payload.get("action") or "add")
+                username = payload.get("username")
+                if action == "add":
+                    enhanced.admin.add_admin_user(username, payload.get("password"))
+                elif action == "password":
+                    enhanced.admin.update_admin_user(username, password=payload.get("password"))
+                elif action == "enabled":
+                    enhanced.admin.update_admin_user(username, enabled=bool(payload.get("enabled")))
+                elif action == "delete":
+                    enhanced.admin.update_admin_user(username, delete=True)
+                else:
+                    raise ValueError("Unknown administrator action")
+                return self.send_json({"ok": True, "username": username})
+            except (ValueError, TypeError) as exc:
+                return self.send_json({"error": str(exc)}, 400)
+            except Exception as exc:
+                return self.send_json({"error": str(exc)}, 500)
         if path == "/api/admin/payouts/pause":
             if not self._require_admin():
                 return
