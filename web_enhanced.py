@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Additive health/diagnostics layer for the existing YERB Pool dashboard."""
 
+import csv
+import io
 import socket
 import time
 from decimal import Decimal
@@ -24,6 +26,7 @@ CACHE_SECONDS = 10.0
 COIN = 100_000_000
 API_VERSION = "1.0.0"
 MAX_PAGE_SIZE = 500
+PUBLIC_ACTIVITY_DAYS = 7
 
 # Public Configure page uses the normal dashboard shell.
 admin.live.base.FRONTEND_ROUTES.add("/configure")
@@ -625,6 +628,109 @@ def api_v1_list(resource, query):
     return _page(items, total, limit, offset)
 
 
+def _csv_safe(value):
+    """Prevent spreadsheet formula execution in user-controlled CSV cells."""
+    text = "" if value is None else str(value)
+    return "'" + text if text.startswith(("=", "+", "-", "@")) else text
+
+
+def public_data_csv(resource, address=None, now=None):
+    """Export the same seven-day miner/worker population shown publicly."""
+    now = int(time.time()) if now is None else int(now)
+    activity_cutoff = now - PUBLIC_ACTIVITY_DAYS * 24 * 60 * 60
+    hashrate_cutoff = now - int(admin.live.HASHRATE_WINDOW)
+    try:
+        treasury = get_treasury_address(admin.CFG)
+    except Exception:
+        treasury = ""
+
+    with admin.live.base.db() as con:
+        if resource == "miners":
+            clauses = ["a.address!=?"] if treasury else []
+            params = [treasury] if treasury else []
+            where = " WHERE " + " AND ".join(clauses) if clauses else ""
+            records = admin.live.base.rows(
+                con,
+                f"""SELECT a.address,COUNT(w.id) worker_count,
+                           COALESCE(SUM(w.accepted_shares),0) accepted_shares,
+                           COALESCE(SUM(w.rejected_shares),0) rejected_shares,
+                           a.balance_atomic,a.immature_balance_atomic,a.total_earned_atomic,a.total_paid_atomic,
+                           COALESCE(MAX(w.last_seen_at),0) last_seen_at
+                    FROM accounts a LEFT JOIN workers w ON w.account_id=a.id{where}
+                    GROUP BY a.id HAVING COALESCE(MAX(w.last_seen_at),0)>=?
+                    ORDER BY last_seen_at DESC""",
+                (*params, activity_cutoff),
+            )
+            headers = [
+                "address", "workers", "accepted", "rejected", "rejection_percent",
+                "mature_balance_yerb", "immature_balance_yerb", "total_earned_yerb",
+                "total_paid_yerb", "last_seen_utc",
+            ]
+            rows = []
+            for item in records:
+                accepted = int(item.get("accepted_shares") or 0)
+                rejected = int(item.get("rejected_shares") or 0)
+                total = accepted + rejected
+                rows.append([
+                    item.get("address"), item.get("worker_count"), accepted, rejected,
+                    f"{(rejected / total * 100) if total else 0:.2f}",
+                    _coin_string(item.get("balance_atomic")),
+                    _coin_string(item.get("immature_balance_atomic")),
+                    _coin_string(item.get("total_earned_atomic")),
+                    _coin_string(item.get("total_paid_atomic")),
+                    time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(int(item.get("last_seen_at") or 0))),
+                ])
+        elif resource == "workers":
+            clauses = ["a.address!=?"] if treasury else []
+            params = [treasury] if treasury else []
+            if address:
+                clauses.append("a.address=?")
+                params.append(address)
+            where = " WHERE " + " AND ".join(clauses) if clauses else ""
+            records = admin.live.base.rows(
+                con,
+                f"""SELECT w.id,a.address,w.name,w.created_at,w.last_seen_at,
+                           w.accepted_shares,w.rejected_shares,
+                           COALESCE(SUM(CASE WHEN s.accepted=1 AND s.ts>=? THEN s.difficulty ELSE 0 END),0) recent_diff,
+                           COALESCE(MAX(CASE WHEN s.accepted=1 THEN s.ts ELSE NULL END),0) last_share_at
+                    FROM workers w JOIN accounts a ON a.id=w.account_id
+                    LEFT JOIN shares s ON s.worker_id=w.id{where}
+                    GROUP BY w.id
+                    HAVING MAX(w.last_seen_at,COALESCE(MAX(s.ts),0))>=?
+                    ORDER BY MAX(w.last_seen_at,COALESCE(MAX(s.ts),0)) DESC""",
+                (hashrate_cutoff, *params, activity_cutoff),
+            )
+            headers = [
+                "worker_id", "address", "worker", "status", "estimated_hashrate_hs",
+                "accepted", "rejected", "rejection_percent", "first_seen_utc",
+                "last_share_utc", "last_seen_utc",
+            ]
+            rows = []
+            for item in records:
+                accepted = int(item.get("accepted_shares") or 0)
+                rejected = int(item.get("rejected_shares") or 0)
+                total = accepted + rejected
+                last_share = int(item.get("last_share_at") or 0)
+                last_seen = int(item.get("last_seen_at") or 0)
+                active = max(last_share, last_seen) >= hashrate_cutoff
+                rows.append([
+                    item.get("id"), item.get("address"), item.get("name"), "Active" if active else "Idle",
+                    f"{float(admin.live._hashrate_from_diff(item.get('recent_diff'))):.2f}",
+                    accepted, rejected, f"{(rejected / total * 100) if total else 0:.2f}",
+                    time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(int(item.get("created_at") or 0))),
+                    time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(last_share)) if last_share else "",
+                    time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(last_seen)) if last_seen else "",
+                ])
+        else:
+            raise ValueError("unknown CSV resource")
+
+    output = io.StringIO(newline="")
+    writer = csv.writer(output)
+    writer.writerow(headers)
+    writer.writerows([[_csv_safe(value) for value in row] for row in rows])
+    return ("\ufeff" + output.getvalue()).encode("utf-8")
+
+
 def _stratum_online():
     cfg = admin.CFG.get("stratum", {})
     host = str(cfg.get("host", "0.0.0.0"))
@@ -755,10 +861,26 @@ def api_pool(force=False):
 
 
 class EnhancedHandler(admin.AdminHandler):
+    def send_csv(self, body, filename):
+        self.send_response(200)
+        self.send_header("Content-Type", "text/csv; charset=utf-8")
+        self.send_header("Content-Disposition", f'attachment; filename="{filename}"')
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
     def do_GET(self):
         parsed = urlparse(self.path)
         path = parsed.path
         query = parse_qs(parsed.query)
+        if path in ("/api/export/miners.csv", "/api/export/workers.csv"):
+            resource = "miners" if path.endswith("miners.csv") else "workers"
+            address = (query.get("address") or [None])[0]
+            return self.send_csv(
+                public_data_csv(resource, address=address),
+                f"yerb-pool-{resource}-{time.strftime('%Y-%m-%d')}.csv",
+            )
         if path in ("/api", "/api/", "/api/help"):
             return self.send_json(api_help())
         if path == "/api/meta":
