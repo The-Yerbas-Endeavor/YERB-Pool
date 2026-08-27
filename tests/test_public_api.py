@@ -110,17 +110,20 @@ class PublicApiTest(unittest.TestCase):
 
     def test_miner_account_and_individual_worker_csv_exports(self):
         miner = list(csv.DictReader(io.StringIO(api.detail_data_csv("account", "yMinerA").decode("utf-8-sig"))))
-        self.assertEqual(len(miner), 1)
+        self.assertEqual(len(miner), 3)
         self.assertEqual(miner[0]["address"], "yMinerA")
         self.assertEqual(miner[0]["workers"], "2")
         self.assertEqual(miner[0]["total_paid_yerb"], "2.98500000")
+        self.assertEqual({row["share_result"] for row in miner}, {"Accepted", "Rejected"})
+        self.assertEqual({row["share_worker"] for row in miner}, {"yMinerA.rig1", "yMinerA.rig2"})
 
         with self.db._connect() as con:
             rig1 = con.execute("SELECT id FROM workers WHERE name='rig1'").fetchone()[0]
         worker = list(csv.DictReader(io.StringIO(api.detail_data_csv("worker", rig1).decode("utf-8-sig"))))
-        self.assertEqual(len(worker), 1)
+        self.assertEqual(len(worker), 2)
         self.assertEqual(worker[0]["worker"], "rig1")
         self.assertEqual(worker[0]["address"], "yMinerA")
+        self.assertTrue(all(row["share_worker"] == "yMinerA.rig1" for row in worker))
 
     def test_performance_returns_bounded_history(self):
         result = api.api_performance(address="yMinerA", hours=1, bucket_seconds=300)

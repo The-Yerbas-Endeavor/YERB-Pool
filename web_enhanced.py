@@ -737,7 +737,7 @@ def _utc_time(value):
 
 
 def detail_data_csv(resource, identifier):
-    """Export one miner-account or individual-worker snapshot."""
+    """Export one miner account or worker with its complete stored share history."""
     if resource == "account":
         item = api_account_summary(identifier)
         if item is None:
@@ -787,6 +787,49 @@ def detail_data_csv(resource, identifier):
         ]]
     else:
         raise ValueError("unknown CSV resource")
+
+    history_headers = [
+        "share_id", "share_submitted_utc", "share_worker_id", "share_worker",
+        "share_job_id", "share_difficulty", "share_result", "share_accepted",
+        "share_rejection_reason", "share_block_candidate", "share_hash",
+    ]
+    headers.extend(history_headers)
+    with admin.live.base.db() as con:
+        share_columns = {row[1] for row in con.execute("PRAGMA table_info(shares)")}
+        reason_expr = (
+            "COALESCE(NULLIF(TRIM(s.rejection_reason),''),'Unspecified') AS rejection_reason"
+            if "rejection_reason" in share_columns
+            else "CASE WHEN s.accepted=0 THEN 'Unspecified' ELSE '' END AS rejection_reason"
+        )
+        if resource == "account":
+            where = "a.address=?"
+            params = (identifier,)
+        else:
+            where = "s.worker_id=?"
+            params = (int(identifier),)
+        shares = admin.live.base.rows(
+            con,
+            f"""SELECT s.id,s.ts,s.worker_id,s.worker,s.job_id,s.difficulty,s.accepted,
+                       s.block_candidate,s.hash,{reason_expr}
+                FROM shares s LEFT JOIN accounts a ON a.id=s.account_id
+                WHERE {where} ORDER BY s.id DESC""",
+            params,
+        )
+
+    summary = rows[0]
+    rows = [
+        summary + [
+            share.get("id"), _utc_time(share.get("ts")), share.get("worker_id"),
+            share.get("worker"), share.get("job_id"), share.get("difficulty"),
+            "Accepted" if share.get("accepted") else "Rejected",
+            int(bool(share.get("accepted"))),
+            "" if share.get("accepted") else share.get("rejection_reason"),
+            int(bool(share.get("block_candidate"))), share.get("hash") or "",
+        ]
+        for share in shares
+    ]
+    if not rows:
+        rows = [summary + [""] * len(history_headers)]
 
     output = io.StringIO(newline="")
     writer = csv.writer(output)
