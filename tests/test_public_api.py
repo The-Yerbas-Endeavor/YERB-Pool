@@ -1,4 +1,6 @@
 import json
+import csv
+import io
 import os
 import tempfile
 import unittest
@@ -105,6 +107,19 @@ class PublicApiTest(unittest.TestCase):
         self.assertEqual(page["pagination"]["limit"], 1)
         self.assertEqual(len(page["items"]), 1)
         self.assertEqual(page["items"][0]["height"], 1000)
+
+    def test_public_miner_and_worker_csv_exports(self):
+        now = int(__import__("time").time())
+        miners = list(csv.DictReader(io.StringIO(api.public_data_csv("miners", now=now).decode("utf-8-sig"))))
+        self.assertEqual(len(miners), 1)
+        self.assertEqual(miners[0]["address"], "yMinerA")
+        self.assertEqual(miners[0]["workers"], "2")
+        self.assertEqual(miners[0]["total_paid_yerb"], "2.98500000")
+
+        workers = list(csv.DictReader(io.StringIO(api.public_data_csv("workers", address="yMinerA", now=now).decode("utf-8-sig"))))
+        self.assertEqual(len(workers), 2)
+        self.assertEqual({row["worker"] for row in workers}, {"rig1", "rig2"})
+        self.assertTrue(all(row["address"] == "yMinerA" for row in workers))
 
     def test_performance_returns_bounded_history(self):
         result = api.api_performance(address="yMinerA", hours=1, bucket_seconds=300)
