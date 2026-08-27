@@ -43,7 +43,7 @@ if "/block_presentation.js" not in admin.live.base.LUCK_SCRIPT:
 if "/payout_presentation.js" not in admin.live.base.LUCK_SCRIPT:
     admin.live.base.LUCK_SCRIPT += '<script src="/payout_presentation.js?v=4"></script>'
 if "/worker_detail.js" not in admin.live.base.LUCK_SCRIPT:
-    admin.live.base.LUCK_SCRIPT += '<script src="/worker_detail.js?v=13"></script>'
+    admin.live.base.LUCK_SCRIPT += '<script src="/worker_detail.js?v=14"></script>'
 
 
 def effective_public_settings():
@@ -731,6 +731,70 @@ def public_data_csv(resource, address=None, now=None):
     return ("\ufeff" + output.getvalue()).encode("utf-8")
 
 
+def _utc_time(value):
+    value = int(value or 0)
+    return time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(value)) if value else ""
+
+
+def detail_data_csv(resource, identifier):
+    """Export one miner-account or individual-worker snapshot."""
+    if resource == "account":
+        item = api_account_summary(identifier)
+        if item is None:
+            return None
+        headers = [
+            "address", "status", "workers", "active_workers", "current_hashrate_hs",
+            "average_hashrate_1h_hs", "average_hashrate_24h_hs", "accepted", "rejected",
+            "rejection_percent", "mature_balance_yerb", "immature_balance_yerb",
+            "total_earned_yerb", "total_paid_yerb", "paid_24h_yerb", "first_seen_utc",
+            "last_share_utc", "exported_utc",
+        ]
+        rows = [[
+            item.get("address"), "Enabled" if item.get("enabled") else "Payments held",
+            len(item.get("workers") or []), item.get("active_workers"),
+            f"{float(item.get('hashrate') or 0):.2f}", f"{float(item.get('hashrate_1h') or 0):.2f}",
+            f"{float(item.get('hashrate_24h') or 0):.2f}", item.get("accepted_shares"),
+            item.get("rejected_shares"), f"{float(item.get('rejection_percent') or 0):.2f}",
+            item.get("balance"), item.get("immature_balance"), item.get("total_earned"),
+            item.get("total_paid"), item.get("paid_24h"), _utc_time(item.get("created_at")),
+            _utc_time(item.get("last_share_at")), _utc_time(item.get("generated_at")),
+        ]]
+    elif resource == "worker":
+        try:
+            item = api_worker_detail(int(identifier), hours=24, bucket_seconds=600, share_limit=1)
+        except (TypeError, ValueError):
+            return None
+        if item is None:
+            return None
+        accepted = int(item.get("accepted_shares") or 0)
+        rejected = int(item.get("rejected_shares") or 0)
+        total = accepted + rejected
+        headers = [
+            "worker_id", "address", "worker", "status", "current_hashrate_hs",
+            "average_hashrate_24h_hs", "accepted", "rejected", "efficiency_percent",
+            "last_share_difficulty", "blocks_found", "first_seen_utc", "last_share_utc",
+            "last_seen_utc", "exported_utc",
+        ]
+        rows = [[
+            item.get("id"), item.get("address"), item.get("name"),
+            "Active" if item.get("active") else "Idle", f"{float(item.get('hashrate') or 0):.2f}",
+            f"{float(item.get('average_hashrate') or 0):.2f}", accepted, rejected,
+            f"{(accepted / total * 100) if total else 100:.2f}",
+            "" if item.get("last_share_difficulty") is None else item.get("last_share_difficulty"),
+            item.get("blocks_found_total"), _utc_time(item.get("created_at")),
+            _utc_time(item.get("last_share_at")), _utc_time(item.get("last_seen_at")),
+            _utc_time(item.get("generated_at")),
+        ]]
+    else:
+        raise ValueError("unknown CSV resource")
+
+    output = io.StringIO(newline="")
+    writer = csv.writer(output)
+    writer.writerow(headers)
+    writer.writerows([[_csv_safe(value) for value in row] for row in rows])
+    return ("\ufeff" + output.getvalue()).encode("utf-8")
+
+
 def _stratum_online():
     cfg = admin.CFG.get("stratum", {})
     host = str(cfg.get("host", "0.0.0.0"))
@@ -874,13 +938,18 @@ class EnhancedHandler(admin.AdminHandler):
         parsed = urlparse(self.path)
         path = parsed.path
         query = parse_qs(parsed.query)
-        if path in ("/api/export/miners.csv", "/api/export/workers.csv"):
-            resource = "miners" if path.endswith("miners.csv") else "workers"
-            address = (query.get("address") or [None])[0]
-            return self.send_csv(
-                public_data_csv(resource, address=address),
-                f"yerb-pool-{resource}-{time.strftime('%Y-%m-%d')}.csv",
-            )
+        if path.startswith("/api/export/account/") and path.endswith(".csv"):
+            address = unquote(path[len("/api/export/account/"):-4])
+            body = detail_data_csv("account", address)
+            if body is None:
+                return self.send_json({"error": "account not found"}, 404)
+            return self.send_csv(body, f"yerb-miner-account-{time.strftime('%Y-%m-%d')}.csv")
+        if path.startswith("/api/export/worker/") and path.endswith(".csv"):
+            worker_id = unquote(path[len("/api/export/worker/"):-4])
+            body = detail_data_csv("worker", worker_id)
+            if body is None:
+                return self.send_json({"error": "worker not found"}, 404)
+            return self.send_csv(body, f"yerb-worker-{worker_id}-{time.strftime('%Y-%m-%d')}.csv")
         if path in ("/api", "/api/", "/api/help"):
             return self.send_json(api_help())
         if path == "/api/meta":
