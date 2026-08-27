@@ -109,21 +109,58 @@ class PublicApiTest(unittest.TestCase):
         self.assertEqual(page["items"][0]["height"], 1000)
 
     def test_miner_account_and_individual_worker_csv_exports(self):
-        miner = list(csv.DictReader(io.StringIO(api.detail_data_csv("account", "yMinerA").decode("utf-8-sig"))))
+        miner_text = api.detail_data_csv("account", "yMinerA", days=7, include_sensitive=False).decode("utf-8-sig")
+        miner_reader = csv.DictReader(io.StringIO(miner_text))
+        miner = list(miner_reader)
         self.assertEqual(len(miner), 3)
         self.assertEqual(miner[0]["address"], "yMinerA")
         self.assertEqual(miner[0]["workers"], "2")
         self.assertEqual(miner[0]["total_paid_yerb"], "2.98500000")
         self.assertEqual({row["share_result"] for row in miner}, {"Accepted", "Rejected"})
         self.assertEqual({row["share_worker"] for row in miner}, {"yMinerA.rig1", "yMinerA.rig2"})
+        self.assertNotIn("share_job_id", miner_reader.fieldnames)
+        self.assertNotIn("share_hash", miner_reader.fieldnames)
 
         with self.db._connect() as con:
             rig1 = con.execute("SELECT id FROM workers WHERE name='rig1'").fetchone()[0]
-        worker = list(csv.DictReader(io.StringIO(api.detail_data_csv("worker", rig1).decode("utf-8-sig"))))
+        worker_text = api.detail_data_csv("worker", rig1, days=7, include_sensitive=False).decode("utf-8-sig")
+        worker_reader = csv.DictReader(io.StringIO(worker_text))
+        worker = list(worker_reader)
         self.assertEqual(len(worker), 2)
         self.assertEqual(worker[0]["worker"], "rig1")
         self.assertEqual(worker[0]["address"], "yMinerA")
         self.assertTrue(all(row["share_worker"] == "yMinerA.rig1" for row in worker))
+
+        lifetime_reader = csv.DictReader(io.StringIO(api.detail_data_csv("worker", rig1, days=None, include_sensitive=True).decode("utf-8-sig")))
+        list(lifetime_reader)
+        self.assertIn("share_job_id", lifetime_reader.fieldnames)
+        self.assertIn("share_hash", lifetime_reader.fieldnames)
+
+    def test_public_export_rate_limit_requires_challenge(self):
+        key = ("192.0.2.10", "worker", "77")
+        api._export_attempts.pop(key, None)
+        for _ in range(api.PUBLIC_EXPORT_LIMIT):
+            allowed, challenge = api._public_export_gate(key)
+            self.assertTrue(allowed)
+            self.assertIsNone(challenge)
+        allowed, challenge = api._public_export_gate(key)
+        self.assertFalse(allowed)
+        token, left, right = challenge
+        allowed, _ = api._public_export_gate(key, token, str(left + right))
+        self.assertTrue(allowed)
+
+    def test_public_export_excludes_shares_older_than_seven_days(self):
+        with self.db._connect() as con:
+            oldest_id = con.execute("SELECT MIN(id) FROM shares").fetchone()[0]
+            con.execute("UPDATE shares SET ts=? WHERE id=?", (1, oldest_id))
+        public_rows = list(csv.DictReader(io.StringIO(
+            api.detail_data_csv("account", "yMinerA", days=7, include_sensitive=False).decode("utf-8-sig")
+        )))
+        lifetime_rows = list(csv.DictReader(io.StringIO(
+            api.detail_data_csv("account", "yMinerA", days=None, include_sensitive=True).decode("utf-8-sig")
+        )))
+        self.assertEqual(len(public_rows), 2)
+        self.assertEqual(len(lifetime_rows), 3)
 
     def test_performance_returns_bounded_history(self):
         result = api.api_performance(address="yMinerA", hours=1, bucket_seconds=300)

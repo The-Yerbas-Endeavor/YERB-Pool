@@ -3,7 +3,7 @@
 
 import sqlite3
 from http.server import ThreadingHTTPServer
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
 import web_enhanced as enhanced
 from yerbpool.payout_control import (
@@ -82,6 +82,13 @@ def _users_snapshot():
     treasury_address = enhanced.admin._treasury_address()
     window = enhanced.admin.live.HASHRATE_WINDOW
     users = list_users(path, window, treasury_address)
+    with enhanced.admin.live.base.db() as con:
+        for user in users:
+            user["workers"] = enhanced.admin.live.base.rows(
+                con,
+                "SELECT id,name FROM workers WHERE account_id=? ORDER BY name",
+                (int(user["id"]),),
+            )
     for user in users:
         current_diff = float(user.pop("current_accepted_diff", 0) or 0)
         diff_24h = float(user.pop("accepted_diff_24h", 0) or 0)
@@ -110,7 +117,7 @@ def _inject_user_admin(html):
     if "/admin_users.js" not in html:
         extra = '''<style>
 #admin-users{margin-top:14px}.user-toolbar{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:10px}.user-toolbar input{width:min(520px,80vw)}.admin-user-table-wrap{overflow-x:auto}.admin-user-table{min-width:2350px}.admin-user-table td{vertical-align:top;white-space:nowrap}.admin-user-table td.user-address,.admin-user-table td.user-ips{white-space:normal}.user-small{font-size:11px;margin-top:4px}.admin-ip{margin-bottom:10px}.user-badge{display:inline-block;padding:3px 7px;border-radius:999px;border:1px solid #444;font-size:11px;font-weight:700}.user-ok{color:#9fe3a7;border-color:#376c41;background:#152719}.user-paused{color:#ffe08a;border-color:#6d5d2b;background:#29240f}.user-banned,.user-suspended{color:#ffaaaa;border-color:#7b3737;background:#2b1515}.user-control-btn,.user-mini-btn{padding:6px 9px;font-size:11px}.user-mini-btn{margin-left:6px}.danger{background:#8a3434}button:disabled{opacity:.55;cursor:wait}
-</style><script src="/admin_users.js?v=2"></script>'''
+</style><script src="/admin_users.js?v=3"></script>'''
         html = html.replace("</body>", extra + "</body>")
     return html
 
@@ -156,6 +163,22 @@ class ControlHandler(enhanced.EnhancedHandler):
                 return self.send_json(_users_snapshot())
             except Exception as exc:
                 return self.send_json({"error": str(exc)}, 500)
+        if path.startswith("/api/admin/export/account/") and path.endswith(".csv"):
+            if not self._require_admin():
+                return
+            address = unquote(path[len("/api/admin/export/account/"):-4])
+            body = enhanced.detail_data_csv("account", address, days=None, include_sensitive=True)
+            if body is None:
+                return self.send_json({"error": "account not found"}, 404)
+            return self.send_csv(body, f"yerb-admin-account-lifetime-{enhanced.time.strftime('%Y-%m-%d')}.csv")
+        if path.startswith("/api/admin/export/worker/") and path.endswith(".csv"):
+            if not self._require_admin():
+                return
+            worker_id = unquote(path[len("/api/admin/export/worker/"):-4])
+            body = enhanced.detail_data_csv("worker", worker_id, days=None, include_sensitive=True)
+            if body is None:
+                return self.send_json({"error": "worker not found"}, 404)
+            return self.send_csv(body, f"yerb-admin-worker-{worker_id}-lifetime-{enhanced.time.strftime('%Y-%m-%d')}.csv")
         return super().do_GET()
 
     def do_POST(self):
