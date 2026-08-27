@@ -35,8 +35,11 @@ def main():
     if password != confirm:
         raise SystemExit("Passwords do not match")
 
+    managed_users = admin.get("users", [])
     admin.clear()
     admin.update({"username": username, "password_hash": hash_password(password)})
+    if managed_users:
+        admin["users"] = managed_users
     config_path.write_text(json.dumps(cfg, indent=2) + "\n", encoding="utf-8")
     try:
         os.chmod(config_path, 0o600)
