@@ -130,7 +130,7 @@
       <section id="recent-shares"><div class="section-head"><div><h2 style="margin-bottom:4px">Recent Shares</h2><div class="muted">Latest work submitted by this worker.</div></div><a href="/shares?address=${encodeURIComponent(x.address)}">All account shares →</a></div>${recentShares(x.recent_shares)}</section>
       <section><div class="section-head"><div><h2 style="margin-bottom:4px">Rejection Reasons</h2><div class="muted">Lifetime rejected shares for this worker.</div></div><a href="/shares?status=rejected&worker=${encodeURIComponent(x.id)}">Rejected shares →</a></div>${rejectionBreakdown(x.rejection_reasons)}</section>`;
     const workerIdentity=app.querySelector('.worker-detail-id')?.nextElementSibling;
-    if(workerIdentity) workerIdentity.insertAdjacentHTML('beforeend',` &nbsp; <a href="/api/export/worker/${encodeURIComponent(x.id)}.csv" download>Download CSV ↓</a>`);
+    if(workerIdentity) workerIdentity.insertAdjacentHTML('beforeend',` &nbsp; <a href="/api/export/worker/${encodeURIComponent(x.id)}.csv">Download 7-day CSV ↓</a>`);
     bindWorkerRanges();
     if(history.length) bindHashChart(chartData,{cardId:'worker-hash-card',workerId:workerId});
   }

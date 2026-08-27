@@ -2,8 +2,11 @@
 """Additive health/diagnostics layer for the existing YERB Pool dashboard."""
 
 import csv
+import html
 import io
+import secrets
 import socket
+import threading
 import time
 from decimal import Decimal
 from http.server import ThreadingHTTPServer
@@ -27,6 +30,13 @@ COIN = 100_000_000
 API_VERSION = "1.0.0"
 MAX_PAGE_SIZE = 500
 PUBLIC_ACTIVITY_DAYS = 7
+PUBLIC_EXPORT_SECONDS = 7 * 86400
+PUBLIC_EXPORT_LIMIT = 3
+PUBLIC_EXPORT_WINDOW = 3600
+EXPORT_CHALLENGE_SECONDS = 300
+_export_attempts = {}
+_export_challenges = {}
+_export_lock = threading.Lock()
 
 # Public Configure page uses the normal dashboard shell.
 admin.live.base.FRONTEND_ROUTES.add("/configure")
@@ -43,7 +53,7 @@ if "/block_presentation.js" not in admin.live.base.LUCK_SCRIPT:
 if "/payout_presentation.js" not in admin.live.base.LUCK_SCRIPT:
     admin.live.base.LUCK_SCRIPT += '<script src="/payout_presentation.js?v=4"></script>'
 if "/worker_detail.js" not in admin.live.base.LUCK_SCRIPT:
-    admin.live.base.LUCK_SCRIPT += '<script src="/worker_detail.js?v=14"></script>'
+    admin.live.base.LUCK_SCRIPT += '<script src="/worker_detail.js?v=15"></script>'
 
 
 def effective_public_settings():
@@ -736,8 +746,8 @@ def _utc_time(value):
     return time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(value)) if value else ""
 
 
-def detail_data_csv(resource, identifier):
-    """Export one miner account or worker with its complete stored share history."""
+def detail_data_csv(resource, identifier, days=None, include_sensitive=True):
+    """Export account/worker shares, optionally bounded for public downloads."""
     if resource == "account":
         item = api_account_summary(identifier)
         if item is None:
@@ -790,9 +800,11 @@ def detail_data_csv(resource, identifier):
 
     history_headers = [
         "share_id", "share_submitted_utc", "share_worker_id", "share_worker",
-        "share_job_id", "share_difficulty", "share_result", "share_accepted",
-        "share_rejection_reason", "share_block_candidate", "share_hash",
+        "share_difficulty", "share_result", "share_accepted",
+        "share_rejection_reason", "share_block_candidate",
     ]
+    if include_sensitive:
+        history_headers.extend(["share_job_id", "share_hash"])
     headers.extend(history_headers)
     with admin.live.base.db() as con:
         share_columns = {row[1] for row in con.execute("PRAGMA table_info(shares)")}
@@ -802,30 +814,34 @@ def detail_data_csv(resource, identifier):
             else "CASE WHEN s.accepted=0 THEN 'Unspecified' ELSE '' END AS rejection_reason"
         )
         if resource == "account":
-            where = "a.address=?"
-            params = (identifier,)
+            clauses = ["a.address=?"]
+            params = [identifier]
         else:
-            where = "s.worker_id=?"
-            params = (int(identifier),)
+            clauses = ["s.worker_id=?"]
+            params = [int(identifier)]
+        if days is not None:
+            clauses.append("s.ts>=?")
+            params.append(int(time.time()) - max(1, int(days)) * 86400)
+        where = " AND ".join(clauses)
         shares = admin.live.base.rows(
             con,
             f"""SELECT s.id,s.ts,s.worker_id,s.worker,s.job_id,s.difficulty,s.accepted,
                        s.block_candidate,s.hash,{reason_expr}
                 FROM shares s LEFT JOIN accounts a ON a.id=s.account_id
                 WHERE {where} ORDER BY s.id DESC""",
-            params,
+            tuple(params),
         )
 
     summary = rows[0]
     rows = [
         summary + [
             share.get("id"), _utc_time(share.get("ts")), share.get("worker_id"),
-            share.get("worker"), share.get("job_id"), share.get("difficulty"),
+            share.get("worker"), share.get("difficulty"),
             "Accepted" if share.get("accepted") else "Rejected",
             int(bool(share.get("accepted"))),
             "" if share.get("accepted") else share.get("rejection_reason"),
-            int(bool(share.get("block_candidate"))), share.get("hash") or "",
-        ]
+            int(bool(share.get("block_candidate"))),
+        ] + ([share.get("job_id"), share.get("hash") or ""] if include_sensitive else [])
         for share in shares
     ]
     if not rows:
@@ -836,6 +852,29 @@ def detail_data_csv(resource, identifier):
     writer.writerow(headers)
     writer.writerows([[_csv_safe(value) for value in row] for row in rows])
     return ("\ufeff" + output.getvalue()).encode("utf-8")
+
+
+def _public_export_gate(key, token=None, answer=None):
+    now = time.time()
+    with _export_lock:
+        for challenge_token, challenge in list(_export_challenges.items()):
+            if challenge[2] < now:
+                _export_challenges.pop(challenge_token, None)
+        if token and answer:
+            challenge = _export_challenges.pop(token, None)
+            if challenge and challenge[0] == key and challenge[1] == str(answer).strip() and challenge[2] >= now:
+                _export_attempts[key] = [now]
+                return True, None
+        attempts = [stamp for stamp in _export_attempts.get(key, []) if stamp >= now - PUBLIC_EXPORT_WINDOW]
+        if len(attempts) < PUBLIC_EXPORT_LIMIT:
+            attempts.append(now)
+            _export_attempts[key] = attempts
+            return True, None
+        left = secrets.randbelow(8) + 2
+        right = secrets.randbelow(8) + 2
+        challenge_token = secrets.token_urlsafe(24)
+        _export_challenges[challenge_token] = (key, str(left + right), now + EXPORT_CHALLENGE_SECONDS)
+        return False, (challenge_token, left, right)
 
 
 def _stratum_online():
@@ -977,22 +1016,52 @@ class EnhancedHandler(admin.AdminHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _client_ip(self):
+        forwarded = str(self.headers.get("X-Forwarded-For", "")).split(",", 1)[0].strip()
+        return forwarded or str(self.client_address[0])
+
+    def _send_export_challenge(self, path, challenge):
+        token, left, right = challenge
+        safe_path = html.escape(path, quote=True)
+        safe_token = html.escape(token, quote=True)
+        body = f"""<!doctype html><html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>Confirm download</title><style>body{{font-family:system-ui;background:#111;color:#eee;margin:0}}main{{max-width:520px;margin:12vh auto;padding:28px;background:#181818;border:1px solid #2d4332;border-radius:12px}}input,button{{font:inherit;padding:10px 12px;border-radius:7px}}input{{width:110px;background:#222;color:#fff;border:1px solid #555}}button{{background:#276b35;color:#fff;border:1px solid #4c9b5b;cursor:pointer}}.muted{{color:#aaa}}</style></head><body><main><h2>Confirm CSV download</h2><p class=\"muted\">Several exports were requested recently. Solve this quick check to continue.</p><form method=\"get\" action=\"{safe_path}\"><input type=\"hidden\" name=\"captcha_token\" value=\"{safe_token}\"><label for=\"answer\">What is {left} + {right}?</label><br><br><input id=\"answer\" name=\"captcha_answer\" inputmode=\"numeric\" required autofocus> <button type=\"submit\">Download CSV</button></form><p class=\"muted\">This check expires in five minutes.</p></main></body></html>""".encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
     def do_GET(self):
         parsed = urlparse(self.path)
         path = parsed.path
         query = parse_qs(parsed.query)
         if path.startswith("/api/export/account/") and path.endswith(".csv"):
             address = unquote(path[len("/api/export/account/"):-4])
-            body = detail_data_csv("account", address)
+            allowed, challenge = _public_export_gate(
+                (self._client_ip(), "account", address),
+                (query.get("captcha_token") or [None])[0],
+                (query.get("captcha_answer") or [None])[0],
+            )
+            if not allowed:
+                return self._send_export_challenge(path, challenge)
+            body = detail_data_csv("account", address, days=7, include_sensitive=False)
             if body is None:
                 return self.send_json({"error": "account not found"}, 404)
-            return self.send_csv(body, f"yerb-miner-account-{time.strftime('%Y-%m-%d')}.csv")
+            return self.send_csv(body, f"yerb-miner-account-7d-{time.strftime('%Y-%m-%d')}.csv")
         if path.startswith("/api/export/worker/") and path.endswith(".csv"):
             worker_id = unquote(path[len("/api/export/worker/"):-4])
-            body = detail_data_csv("worker", worker_id)
+            allowed, challenge = _public_export_gate(
+                (self._client_ip(), "worker", worker_id),
+                (query.get("captcha_token") or [None])[0],
+                (query.get("captcha_answer") or [None])[0],
+            )
+            if not allowed:
+                return self._send_export_challenge(path, challenge)
+            body = detail_data_csv("worker", worker_id, days=7, include_sensitive=False)
             if body is None:
                 return self.send_json({"error": "worker not found"}, 404)
-            return self.send_csv(body, f"yerb-worker-{worker_id}-{time.strftime('%Y-%m-%d')}.csv")
+            return self.send_csv(body, f"yerb-worker-{worker_id}-7d-{time.strftime('%Y-%m-%d')}.csv")
         if path in ("/api", "/api/", "/api/help"):
             return self.send_json(api_help())
         if path == "/api/meta":
