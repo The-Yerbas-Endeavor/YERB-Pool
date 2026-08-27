@@ -208,7 +208,7 @@ class PreloadedControlHandler(controls.ControlHandler):
         # render/replacement cycle on /account pages.
         text = text.replace(
             "route();\n</script>",
-            "</script><script src=\"/account_native.js?v=2\"></script><script>route();\n</script>",
+            "</script><script src=\"/account_native.js?v=3\"></script><script>route();\n</script>",
             1,
         )
 
