@@ -3,6 +3,7 @@
   let refreshBusy=false;
   let workerShareTimer=null;
   let workerLastShareAt=0;
+  let dashboardMinerObserver=null;
 
   function ensureStyle(){
     if(document.getElementById('yerb-pool-status-style')) return;
@@ -135,13 +136,33 @@
     return `${d}d ${h}h ago`;
   }
 
+  function dashboardMinerCards(){
+    if(location.pathname!=='/') return [];
+    return [...document.querySelectorAll('#combined-hash-card .hash-metric')].filter(el=>{
+      const label=el.querySelector('span')?.textContent?.trim();
+      const detail=el.querySelector('small')?.textContent?.trim();
+      return label==='Miners' || label==='Active miners' || detail==='tracked payout addresses';
+    });
+  }
+
+  function hideStaleDashboardMiners(){
+    const cards=dashboardMinerCards();
+    if(!cards.length) return;
+    for(const duplicate of cards.slice(1)) duplicate.remove();
+    const card=cards[0];
+    if(!state.summary?.accounts || state.summary.accounts.active_miners==null){
+      card.style.visibility='hidden';
+    }
+  }
+
   function updateDashboardActiveMiners(){
     if(location.pathname!=='/') return;
-    const count=Number(state.summary?.accounts?.active_miners||0);
-    const cards=[...document.querySelectorAll('#combined-hash-card .hash-metric')].filter(el=>{
-      const label=el.querySelector('span')?.textContent?.trim();
-      return label==='Miners' || label==='Active miners';
-    });
+    const active=state.summary?.accounts?.active_miners;
+    if(active==null){
+      hideStaleDashboardMiners();
+      return;
+    }
+    const cards=dashboardMinerCards();
     if(!cards.length) return;
 
     const card=cards[0];
@@ -151,8 +172,19 @@
     const value=card.querySelector('strong');
     const detail=card.querySelector('small');
     if(label) label.textContent='Active miners';
-    if(value) value.textContent=count.toLocaleString();
+    if(value) value.textContent=Number(active||0).toLocaleString();
     if(detail) detail.textContent='active within the last hour';
+    card.style.visibility='';
+  }
+
+  function watchDashboardMinerCard(){
+    if(location.pathname!=='/' || dashboardMinerObserver || !document.body) return;
+    dashboardMinerObserver=new MutationObserver(()=>{
+      if(state.summary?.accounts?.active_miners==null) hideStaleDashboardMiners();
+      else updateDashboardActiveMiners();
+    });
+    dashboardMinerObserver.observe(document.body,{childList:true,subtree:true});
+    hideStaleDashboardMiners();
   }
 
   function mergeWorkerShareCards(){
@@ -275,6 +307,8 @@
   function install(){
     ensureStyle();
     ensureStrip();
+    watchDashboardMinerCard();
+    hideStaleDashboardMiners();
     render();
     refresh();
     setHealthWorkerTimer();
