@@ -38,6 +38,17 @@ class ControlledMinerSession(MinerSession):
         })
         self.writer.close()
 
+    async def _reject_solo(self, rid, login):
+        logging.warning("Blocked unsupported solo miner login=%s ip=%s", login, self.peer_ip or "unknown")
+        self.worker = login
+        self.authorized = False
+        await self.send({
+            "id": rid,
+            "result": False,
+            "error": [24, "Solo mining is not supported", None],
+        })
+        self.writer.close()
+
     async def maybe_retarget(self):
         """Retarget VarDiff while preventing a single fast-share burst from overshooting."""
         if not self.pool.vardiff_enabled:
@@ -151,7 +162,10 @@ class ControlledMinerSession(MinerSession):
         method = req.get("method") if isinstance(req, dict) else None
         params = req.get("params") or [] if isinstance(req, dict) else []
         if method == "mining.authorize":
-            login = str(params[0]) if params else ""
+            login = str(params[0]).strip() if params else ""
+            if login.lower().startswith("solo:"):
+                await self._reject_solo(rid, login)
+                return
             address = self._worker_address(login)
             if address and is_account_suspended(self.pool.db, address):
                 self.worker = login
