@@ -138,11 +138,15 @@
   function updateDashboardActiveMiners(){
     if(location.pathname!=='/') return;
     const count=Number(state.summary?.accounts?.active_miners||0);
-    const card=[...document.querySelectorAll('#combined-hash-card .hash-metric')].find(el=>{
+    const cards=[...document.querySelectorAll('#combined-hash-card .hash-metric')].filter(el=>{
       const label=el.querySelector('span')?.textContent?.trim();
       return label==='Miners' || label==='Active miners';
     });
-    if(!card) return;
+    if(!cards.length) return;
+
+    const card=cards[0];
+    for(const duplicate of cards.slice(1)) duplicate.remove();
+
     const label=card.querySelector('span');
     const value=card.querySelector('strong');
     const detail=card.querySelector('small');
