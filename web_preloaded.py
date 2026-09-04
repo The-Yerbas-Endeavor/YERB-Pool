@@ -34,13 +34,13 @@ class PreloadedControlHandler(controls.ControlHandler):
         text = text.replace(
             "let selectedHashRange='24H';",
             "let selectedHashRange='24H';\n"
-            "let dashboardHashContext={poolBalanceAtomic:0,immatureAtomic:0,totalPaidAtomic:0,miners:0,etaSeconds:null,lastBlockAt:0,lastBlockHeight:null};",
+            "let dashboardHashContext={poolBalanceAtomic:0,immatureAtomic:0,totalPaidAtomic:0,activeMiners:0,etaSeconds:null,lastBlockAt:0,lastBlockHeight:null};",
             1,
         )
         text = text.replace(
             "const current=w.reduce((n,x)=>n+Number(x.active?x.hashrate:0),0),poolNow=Number(hash?.pool_hashrate||luck?.pool_hashrate||current);const cards=",
             "const current=w.reduce((n,x)=>n+Number(x.active?x.hashrate:0),0),poolNow=Number(hash?.pool_hashrate||luck?.pool_hashrate||current);"
-            "dashboardHashContext={poolBalanceAtomic:Number(s.accounts.balance_atomic||0),immatureAtomic:Number(s.accounts.immature_atomic||0),totalPaidAtomic:Number(s.payouts.paid_atomic||0),miners:Number(s.accounts.accounts||0),etaSeconds:luck?.eta_seconds??null,lastBlockAt:Number(b?.[0]?.submitted_at||0),lastBlockHeight:b?.[0]?.height??null};"
+            "dashboardHashContext={poolBalanceAtomic:Number(s.accounts.balance_atomic||0),immatureAtomic:Number(s.accounts.immature_atomic||0),totalPaidAtomic:Number(s.payouts.paid_atomic||0),activeMiners:Number(s.accounts.active_miners||0),etaSeconds:luck?.eta_seconds??null,lastBlockAt:Number(b?.[0]?.submitted_at||0),lastBlockHeight:b?.[0]?.height??null};"
             "const cards=",
             1,
         )
@@ -67,9 +67,6 @@ class PreloadedControlHandler(controls.ControlHandler):
             "const samples=opts.workerId?[]:(Array.isArray(data.network_history)?data.network_history:[]),W=1120",
             1,
         )
-        # Give selected-range average hashrate its own Worker Performance card.
-        # ps.avg is calculated from the history returned for the active range,
-        # so it automatically follows 1H / 6H / 12H / 24H / 7D selections.
         text = text.replace(
             '<div class="hash-metric"><span>Current hashrate</span><strong>${hashRate(poolNow)}</strong><small>${selectedHashRange} average ${hashRate(ps.avg)}</small></div>',
             '<div class="hash-metric"><span>Current hashrate</span><strong>${hashRate(poolNow)}</strong><small>live worker estimate</small></div><div class="hash-metric"><span>${selectedHashRange} average</span><strong>${hashRate(ps.avg)}</strong><small>average over selected chart range</small></div>',
@@ -85,8 +82,6 @@ class PreloadedControlHandler(controls.ControlHandler):
             '',
             1,
         )
-        # Worker shares remain visible in the chart/hover detail, but the
-        # summary cards now prioritize the worker's all-time last block find.
         text = text.replace(
             '<div class="hash-metric"><span>Accepted</span><strong>${accepted.toLocaleString()}</strong></div><div class="hash-metric"><span>Rejected</span><strong>${rejected.toLocaleString()}</strong><small>${((accepted+rejected)>0?rejected/(accepted+rejected)*100:0).toFixed(2)}% reject rate</small></div>',
             '<div class="hash-metric"><span>Last block found</span><strong>${Number(opts.lastBlockFound||0)?ago(Number(opts.lastBlockFound||0)):\'never\'}</strong><small>${Number(opts.lastBlockFound||0)?new Date(Number(opts.lastBlockFound||0)*1000).toLocaleString():\'no pool block found by this worker\'}</small></div>',
@@ -113,8 +108,6 @@ class PreloadedControlHandler(controls.ControlHandler):
         )
         text = text.replace("Worker hashrate over selected range", "Worker hashrate and share counts over selected range")
 
-        # Hover labels/colors must match the visible chart legend. #4ba8ff is
-        # reserved for pool/user hashrate; network remains Yerbas green.
         text = text.replace(
             '<span style="color:#80d985">Worker</span>: ${esc(hashRate(pool))}',
             '<span style="color:#4ba8ff">Worker hashrate</span>: ${esc(hashRate(pool))}',
@@ -143,9 +136,6 @@ class PreloadedControlHandler(controls.ControlHandler):
             1,
         )
 
-        # Add pool-found block markers to the native production hashrate chart.
-        # Group blocks into the same time buckets used by the chart and scale
-        # each bar's height by the number of blocks found in that bucket.
         block_chart_js = r'''function nativePoolBlockBars(history,blocks){const rows=Array.isArray(history)?history:[],list=Array.isArray(blocks)?blocks:[];if(!rows.length||!list.length)return'';const W=1120,L=72,R=78,T=22,B=46,H=340,iw=W-L-R,ih=H-T-B,min=Number(rows[0].ts||0),max=Number(rows[rows.length-1].ts||min+1),bucket=rows.length>1?Math.max(1,Number(rows[1].ts)-Number(rows[0].ts)):600,px=ts=>L+(Number(ts)-min)/Math.max(1,max-min)*iw,counts=new Map();for(const b of list){const ts=Number(b.submitted_at);if(ts<min||ts>max+bucket)continue;const start=min+Math.floor((ts-min)/bucket)*bucket;const group=counts.get(start)||[];group.push(b);counts.set(start,group)}if(!counts.size)return'';const maxCount=Math.max(...[...counts.values()].map(v=>v.length),1),maxHeight=Math.min(72,ih*.28),minHeight=12,bw=Math.max(5,Math.min(16,iw/Math.max(1,rows.length)*.72)),base=T+ih;return [...counts.entries()].sort((a,b)=>a[0]-b[0]).map(([start,group])=>{const count=group.length,h=minHeight+(count/maxCount)*(maxHeight-minHeight),x=px(start+bucket/2),heights=group.map(b=>`#${esc(b.height)}`).join(', ');return `<rect class="pool-block-bar" data-block-count="${count}" x="${(x-bw/2).toFixed(1)}" y="${(base-h).toFixed(1)}" width="${bw.toFixed(1)}" height="${h.toFixed(1)}" rx="1"><title>${count} pool block${count===1?'':'s'} · ${heights}</title></rect>`}).join('')}'''
         text = text.replace("function combinedHashChart(data,opts={}){", block_chart_js + "\nfunction combinedHashChart(data,opts={}){", 1)
         text = text.replace(
@@ -159,8 +149,6 @@ class PreloadedControlHandler(controls.ControlHandler):
             1,
         )
 
-        # Add the number of pool blocks in the hovered time bucket to the
-        # dashboard tooltip. Worker tooltips remain unchanged.
         text = text.replace(
             "<br>Pool share: ${share.toFixed(2)}%`;tip.style.left=",
             "<br>Pool share: ${share.toFixed(2)}%<br>Blocks found: ${Array.isArray(data.pool_blocks)?data.pool_blocks.filter(b=>{const bucket=history.length>1?Math.max(1,Number(history[1].ts)-Number(history[0].ts)):600;return Number(b.submitted_at)>=Number(best.ts)&&Number(b.submitted_at)<Number(best.ts)+bucket}).length:0}`;tip.style.left=",
@@ -184,13 +172,17 @@ class PreloadedControlHandler(controls.ControlHandler):
             '<div class="hash-metric"><span>Pool balance / Immature / Total paid</span>'
             '<strong>${coin(dashboardHashContext.poolBalanceAtomic)} / ${coin(dashboardHashContext.immatureAtomic)} / ${coin(dashboardHashContext.totalPaidAtomic)}</strong></div>'
         )
+        active_miners_metric = (
+            '<div class="hash-metric"><span>Active miners</span>'
+            '<strong>${Number(dashboardHashContext.activeMiners||0).toLocaleString()}</strong>'
+            '<small>active within the last hour</small></div>'
+        )
         new_metrics = (
             '<div class="hash-metrics">'
             '<div class="hash-metric"><span>Pool now</span><strong>${hashRate(poolNow)}</strong><small>${selectedHashRange} average ${hashRate(ps.avg)}</small></div>'
             '<div class="hash-metric"><span>Network now</span><strong>${hashRate(networkNow)}</strong><small>${selectedHashRange} average ${hashRate(ns.avg)}</small></div>'
             '<div class="hash-metric"><span>Pool share</span><strong>${share.toFixed(2)}%</strong><small>of current network hash</small></div>'
-            + balance_metric +
-            '<div class="hash-metric"><span>Miners</span><strong>${Number(dashboardHashContext.miners||0).toLocaleString()}</strong><small>tracked payout addresses</small></div>'
+            + balance_metric + active_miners_metric +
             '<div class="hash-metric"><span>Block ETA / Last found</span><strong>${fmtTime(dashboardHashContext.etaSeconds)} / ${dashboardHashContext.lastBlockAt?ago(dashboardHashContext.lastBlockAt):\'never\'}</strong><small>${dashboardHashContext.lastBlockHeight!=null?`latest pool block #${Number(dashboardHashContext.lastBlockHeight).toLocaleString()}`:\'no pool block found\'}</small></div>'
             '</div>'
         )
@@ -198,27 +190,22 @@ class PreloadedControlHandler(controls.ControlHandler):
         text = re.sub(r'<div class="hash-metric"><span>Peak pool</span>.*?</div>', balance_metric, text, count=1)
         text = re.sub(
             r'<div class="hash-metric"><span>Peak network</span>.*?</div>',
-            '<div class="hash-metric"><span>Miners</span><strong>${Number(dashboardHashContext.miners||0).toLocaleString()}</strong><small>tracked payout addresses</small></div><div class="hash-metric"><span>Block ETA / Last found</span><strong>${fmtTime(dashboardHashContext.etaSeconds)} / ${dashboardHashContext.lastBlockAt?ago(dashboardHashContext.lastBlockAt):\'never\'}</strong><small>${dashboardHashContext.lastBlockHeight!=null?`latest pool block #${Number(dashboardHashContext.lastBlockHeight).toLocaleString()}`:\'no pool block found\'}</small></div>',
+            active_miners_metric + '<div class="hash-metric"><span>Block ETA / Last found</span><strong>${fmtTime(dashboardHashContext.etaSeconds)} / ${dashboardHashContext.lastBlockAt?ago(dashboardHashContext.lastBlockAt):\'never\'}</strong><small>${dashboardHashContext.lastBlockHeight!=null?`latest pool block #${Number(dashboardHashContext.lastBlockHeight).toLocaleString()}`:\'no pool block found\'}</small></div>',
             text,
             count=1,
         )
 
-        # Load the native account renderer after all shared helpers are defined
-        # but before route() executes. This eliminates the delayed legacy chart
-        # render/replacement cycle on /account pages.
         text = text.replace(
             "route();\n</script>",
             "</script><script src=\"/account_native.js?v=4\"></script><script>route();\n</script>",
             1,
         )
 
-        # Never let recurring full-page redraws recreate the native charts.
         text = text.replace("if(location.pathname==='/')setInterval(dashboard,10000);", "")
         text = text.replace("if(location.pathname.startsWith('/worker/'))setInterval(worker,30000);", "")
         text = text.replace("if(location.pathname.startsWith('/account/'))setInterval(account,30000);", "")
         text = text.replace("</head>", '<link rel="stylesheet" href="/brand.css?v=1"></head>')
 
-        # Filter legacy injected chart implementations at the production edge.
         luck_script = base.LUCK_SCRIPT
         luck_script = re.sub(
             r'<script[^>]+src=["\'][^"\']*(?:network_hash_chart|hashrate_chart_fast|hashrate_preload_bridge)\.js[^"\']*["\'][^>]*></script>',
