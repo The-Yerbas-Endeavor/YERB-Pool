@@ -1,5 +1,5 @@
 (function(){
-  let state={pool:null,health:null};
+  let state={pool:null,health:null,summary:null};
   let refreshBusy=false;
   let workerShareTimer=null;
   let workerLastShareAt=0;
@@ -135,6 +135,22 @@
     return `${d}d ${h}h ago`;
   }
 
+  function updateDashboardActiveMiners(){
+    if(location.pathname!=='/') return;
+    const count=Number(state.summary?.accounts?.active_miners||0);
+    const card=[...document.querySelectorAll('#combined-hash-card .hash-metric')].find(el=>{
+      const label=el.querySelector('span')?.textContent?.trim();
+      return label==='Miners' || label==='Active miners';
+    });
+    if(!card) return;
+    const label=card.querySelector('span');
+    const value=card.querySelector('strong');
+    const detail=card.querySelector('small');
+    if(label) label.textContent='Active miners';
+    if(value) value.textContent=count.toLocaleString();
+    if(detail) detail.textContent='active within the last hour';
+  }
+
   function mergeWorkerShareCards(){
     if(!location.pathname.startsWith('/worker/')) return;
     const metrics=document.querySelector('#worker-hash-card .hash-metrics');
@@ -230,6 +246,7 @@
     if(fee) fee.textContent=Number(p.pool_fee_percent||0).toFixed(2)+'%';
     const payout=document.getElementById('status-payout');
     if(payout) payout.textContent=formatCountdown(p.next_payout_check_at);
+    updateDashboardActiveMiners();
     renderWorkerLastShare();
   }
 
@@ -237,12 +254,14 @@
     if(refreshBusy) return;
     refreshBusy=true;
     try{
-      const [poolResult,healthResult]=await Promise.allSettled([
+      const [poolResult,healthResult,summaryResult]=await Promise.allSettled([
         fetch('/api/pool',{cache:'no-store'}).then(r=>r.ok?r.json():Promise.reject(new Error('pool status unavailable'))),
-        fetch('/api/health',{cache:'no-store'}).then(r=>r.ok?r.json():Promise.reject(new Error('health unavailable')))
+        fetch('/api/health',{cache:'no-store'}).then(r=>r.ok?r.json():Promise.reject(new Error('health unavailable'))),
+        fetch('/api/summary',{cache:'no-store'}).then(r=>r.ok?r.json():Promise.reject(new Error('summary unavailable')))
       ]);
       if(poolResult.status==='fulfilled') state.pool=poolResult.value;
       if(healthResult.status==='fulfilled') state.health=healthResult.value;
+      if(summaryResult.status==='fulfilled') state.summary=summaryResult.value;
       render();
     }finally{
       refreshBusy=false;
