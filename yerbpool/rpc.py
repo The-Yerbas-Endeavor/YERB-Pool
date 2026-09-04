@@ -62,6 +62,9 @@ class YerbasRPC:
     def getwalletinfo(self):
         return self.call("getwalletinfo")
 
+    def validateaddress(self, address):
+        return self.call("validateaddress", [str(address)])
+
     def getaccount(self, address):
         return str(self.call("getaccount", [address]) or "")
 
