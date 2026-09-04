@@ -1,5 +1,5 @@
 (function(){
-  let state={pool:null,health:null,summary:null};
+  let state={pool:null,health:null,summary:null,activeMiners:null};
   let refreshBusy=false;
   let workerShareTimer=null;
   let workerLastShareAt=0;
@@ -145,34 +145,50 @@
     });
   }
 
-  function hideStaleDashboardMiners(){
+  function activeMinerCount(){
+    if(state.activeMiners!=null) return Number(state.activeMiners||0);
+    const summaryCount=state.summary?.accounts?.active_miners;
+    return summaryCount==null?null:Number(summaryCount||0);
+  }
+
+  function ensureDashboardActiveMinerCard(){
+    if(location.pathname!=='/') return null;
     const cards=dashboardMinerCards();
-    if(!cards.length) return;
-    for(const duplicate of cards.slice(1)) duplicate.remove();
-    const card=cards[0];
-    if(!state.summary?.accounts || state.summary.accounts.active_miners==null){
-      card.style.visibility='hidden';
+    if(cards.length){
+      for(const duplicate of cards.slice(1)) duplicate.remove();
+      return cards[0];
     }
+    const metrics=document.querySelector('#combined-hash-card .hash-metrics');
+    if(!metrics) return null;
+    const card=document.createElement('div');
+    card.className='hash-metric';
+    card.innerHTML='<span>Active miners</span><strong>—</strong><small>active within the last hour</small>';
+    const blockCard=[...metrics.querySelectorAll('.hash-metric')].find(el=>el.querySelector('span')?.textContent?.trim()==='Block ETA / Last found');
+    if(blockCard) metrics.insertBefore(card,blockCard);
+    else metrics.appendChild(card);
+    return card;
+  }
+
+  function hideStaleDashboardMiners(){
+    const card=ensureDashboardActiveMinerCard();
+    if(!card) return;
+    if(activeMinerCount()==null) card.style.visibility='hidden';
   }
 
   function updateDashboardActiveMiners(){
     if(location.pathname!=='/') return;
-    const active=state.summary?.accounts?.active_miners;
+    const active=activeMinerCount();
+    const card=ensureDashboardActiveMinerCard();
+    if(!card) return;
     if(active==null){
-      hideStaleDashboardMiners();
+      card.style.visibility='hidden';
       return;
     }
-    const cards=dashboardMinerCards();
-    if(!cards.length) return;
-
-    const card=cards[0];
-    for(const duplicate of cards.slice(1)) duplicate.remove();
-
     const label=card.querySelector('span');
     const value=card.querySelector('strong');
     const detail=card.querySelector('small');
     if(label) label.textContent='Active miners';
-    if(value) value.textContent=Number(active||0).toLocaleString();
+    if(value) value.textContent=Number(active).toLocaleString();
     if(detail) detail.textContent='active within the last hour';
     card.style.visibility='';
   }
@@ -180,7 +196,7 @@
   function watchDashboardMinerCard(){
     if(location.pathname!=='/' || dashboardMinerObserver || !document.body) return;
     dashboardMinerObserver=new MutationObserver(()=>{
-      if(state.summary?.accounts?.active_miners==null) hideStaleDashboardMiners();
+      if(activeMinerCount()==null) hideStaleDashboardMiners();
       else updateDashboardActiveMiners();
     });
     dashboardMinerObserver.observe(document.body,{childList:true,subtree:true});
@@ -290,14 +306,19 @@
     if(refreshBusy) return;
     refreshBusy=true;
     try{
-      const [poolResult,healthResult,summaryResult]=await Promise.allSettled([
+      const [poolResult,healthResult,summaryResult,minersResult]=await Promise.allSettled([
         fetch('/api/pool',{cache:'no-store'}).then(r=>r.ok?r.json():Promise.reject(new Error('pool status unavailable'))),
         fetch('/api/health',{cache:'no-store'}).then(r=>r.ok?r.json():Promise.reject(new Error('health unavailable'))),
-        fetch('/api/summary',{cache:'no-store'}).then(r=>r.ok?r.json():Promise.reject(new Error('summary unavailable')))
+        fetch('/api/summary',{cache:'no-store'}).then(r=>r.ok?r.json():Promise.reject(new Error('summary unavailable'))),
+        fetch('/api/miners?limit=1000',{cache:'no-store'}).then(r=>r.ok?r.json():Promise.reject(new Error('miners unavailable')))
       ]);
       if(poolResult.status==='fulfilled') state.pool=poolResult.value;
       if(healthResult.status==='fulfilled') state.health=healthResult.value;
       if(summaryResult.status==='fulfilled') state.summary=summaryResult.value;
+      if(minersResult.status==='fulfilled'){
+        const miners=minersResult.value;
+        state.activeMiners=Array.isArray(miners)?miners.length:(Array.isArray(miners?.items)?miners.items.length:null);
+      }
       render();
     }finally{
       refreshBusy=false;
