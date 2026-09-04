@@ -16,6 +16,7 @@
   let busy=false;
   let pending=false;
   let preload=null;
+  let lastMinerRefresh=0;
 
   function cards(){return [...document.querySelectorAll('main#app .chart-card')];}
   function findCard(title){return cards().find(c=>c.querySelector('h3')?.textContent.trim()===title)||null;}
@@ -40,7 +41,17 @@
     const r=RANGES[range];
     return get(`/api/hashrate/chart?hours=${r.hours}&bucket=${r.bucket}&_=${Date.now()}`).catch(()=>null);
   }
-
+  async function fetchCurrentMinerCount(force=false){
+    const now=Date.now();
+    if(!force && now-lastMinerRefresh<60*60*1000) return null;
+    try{
+      const miners=await get(`/api/miners?limit=1000&_=${now}`);
+      const list=Array.isArray(miners)?miners:(Array.isArray(miners?.items)?miners.items:[]);
+      const cutoff=Math.floor(now/1000)-60*60;
+      lastMinerRefresh=now;
+      return list.filter(m=>Number(m?.last_seen_at||0)>=cutoff).length;
+    }catch(_){return null;}
+  }
   function readSamples(){try{const a=JSON.parse(localStorage.getItem(STORAGE_KEY)||'[]');return Array.isArray(a)?a:[];}catch(_){return [];}}
   function saveNetworkSample(hashrate){
     const now=Math.floor(Date.now()/1000);
@@ -88,7 +99,7 @@
   function styles(){
     if(document.getElementById('combined-hash-styles')) return;
     const s=document.createElement('style');s.id='combined-hash-styles';s.textContent=`
-      .combined-hash-grid{grid-template-columns:1fr!important}.combined-hash-card{width:100%}.hash-head{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap}.hash-range{display:flex;gap:7px;flex-wrap:wrap}.hash-range button{background:#24242c;color:#eee;border:1px solid #666b78;border-radius:7px;padding:6px 11px;font-size:11px;font-weight:700;cursor:pointer}.hash-range button:disabled{cursor:default;opacity:.75}.hash-range button:hover:not(:disabled){border-color:#85b98a}.hash-range button.active{background:rgba(101,196,102,.15);border-color:var(--yerb,#65c466);color:#e2ffe4}.hash-loading{min-height:340px;display:flex;align-items:center;justify-content:center;color:#819284;font-size:13px}.hash-metrics{display:grid;grid-template-columns:repeat(5,minmax(130px,1fr));gap:10px;margin:14px 0}.hash-metric{border:1px solid #2d4332;border-radius:9px;padding:11px 13px;background:#141816}.hash-metric span{display:block;color:#9caf9d;font-size:11px}.hash-metric strong{display:block;color:#e9f7ea;font-size:19px;margin-top:3px}.hash-metric small{display:block;color:#829184;font-size:10px;margin-top:3px}.combined-chart-wrap{position:relative;margin-top:8px}.combined-hash-chart{height:340px;cursor:crosshair;overflow:visible}.combined-hash-chart .pool-line{fill:none;stroke:var(--yerb,#65c466);stroke-width:2.6;vector-effect:non-scaling-stroke}.combined-hash-chart .network-line{fill:none;stroke:#45a3ff;stroke-width:2.4;vector-effect:non-scaling-stroke}.combined-hash-chart .pool-area{fill:rgba(101,196,102,.11)}.combined-hash-chart .network-area{fill:rgba(69,163,255,.08)}.combined-hash-chart .axis{font-size:10px;fill:#8ea091}.combined-hash-chart .pool-axis{fill:#80d985}.combined-hash-chart .net-axis{fill:#6eb7ff}.hash-crosshair{stroke:#8b968d;stroke-width:1;stroke-dasharray:4 4;opacity:0;vector-effect:non-scaling-stroke}.combined-hash-tooltip{position:absolute;z-index:9;pointer-events:none;min-width:180px;padding:9px 11px;border:1px solid #35503b;border-radius:8px;background:rgba(9,14,11,.97);box-shadow:0 8px 28px rgba(0,0,0,.35);font-size:11px;line-height:1.55;color:#e6efe7;transform:translate(-50%,-112%)}.hash-legend{display:flex;justify-content:center;gap:22px;flex-wrap:wrap;margin-top:9px;font-size:12px}.hash-dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px}.hash-dot.pool{background:#65c466}.hash-dot.net{background:#45a3ff}.hash-footer{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-top:8px;color:#718477;font-size:10px}@media(max-width:900px){.hash-metrics{grid-template-columns:repeat(2,minmax(130px,1fr))}}@media(max-width:560px){.hash-metrics{grid-template-columns:1fr}.combined-hash-chart{height:300px}}`;
+      .combined-hash-grid{grid-template-columns:1fr!important}.combined-hash-card{width:100%}.hash-head{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap}.hash-range{display:flex;gap:7px;flex-wrap:wrap}.hash-range button{background:#24242c;color:#eee;border:1px solid #666b78;border-radius:7px;padding:6px 11px;font-size:11px;font-weight:700;cursor:pointer}.hash-range button:disabled{cursor:default;opacity:.75}.hash-range button:hover:not(:disabled){border-color:#85b98a}.hash-range button.active{background:rgba(101,196,102,.15);border-color:var(--yerb,#65c466);color:#e2ffe4}.hash-loading{min-height:340px;display:flex;align-items:center;justify-content:center;color:#819284;font-size:13px}.hash-metrics{display:grid;grid-template-columns:repeat(6,minmax(130px,1fr));gap:10px;margin:14px 0}.hash-metric{border:1px solid #2d4332;border-radius:9px;padding:11px 13px;background:#141816}.hash-metric span{display:block;color:#9caf9d;font-size:11px}.hash-metric strong{display:block;color:#e9f7ea;font-size:19px;margin-top:3px}.hash-metric small{display:block;color:#829184;font-size:10px;margin-top:3px}.combined-chart-wrap{position:relative;margin-top:8px}.combined-hash-chart{height:340px;cursor:crosshair;overflow:visible}.combined-hash-chart .pool-line{fill:none;stroke:var(--yerb,#65c466);stroke-width:2.6;vector-effect:non-scaling-stroke}.combined-hash-chart .network-line{fill:none;stroke:#45a3ff;stroke-width:2.4;vector-effect:non-scaling-stroke}.combined-hash-chart .pool-area{fill:rgba(101,196,102,.11)}.combined-hash-chart .network-area{fill:rgba(69,163,255,.08)}.combined-hash-chart .axis{font-size:10px;fill:#8ea091}.combined-hash-chart .pool-axis{fill:#80d985}.combined-hash-chart .net-axis{fill:#6eb7ff}.hash-crosshair{stroke:#8b968d;stroke-width:1;stroke-dasharray:4 4;opacity:0;vector-effect:non-scaling-stroke}.combined-hash-tooltip{position:absolute;z-index:9;pointer-events:none;min-width:180px;padding:9px 11px;border:1px solid #35503b;border-radius:8px;background:rgba(9,14,11,.97);box-shadow:0 8px 28px rgba(0,0,0,.35);font-size:11px;line-height:1.55;color:#e6efe7;transform:translate(-50%,-112%)}.hash-legend{display:flex;justify-content:center;gap:22px;flex-wrap:wrap;margin-top:9px;font-size:12px}.hash-dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px}.hash-dot.pool{background:#65c466}.hash-dot.net{background:#45a3ff}.hash-footer{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-top:8px;color:#718477;font-size:10px}@media(max-width:1050px){.hash-metrics{grid-template-columns:repeat(3,minmax(130px,1fr))}}@media(max-width:700px){.hash-metrics{grid-template-columns:repeat(2,minmax(130px,1fr))}}@media(max-width:560px){.hash-metrics{grid-template-columns:1fr}.combined-hash-chart{height:300px}}`;
     document.head.appendChild(s);
   }
 
@@ -126,7 +137,7 @@
     try{
       const request=preload||fetchSnapshot(selectedRange);
       preload=null;
-      const data=await request;
+      const [data,currentMiners]=await Promise.all([request,fetchCurrentMinerCount(force)]);
       const history=Array.isArray(data?.history)?data.history:[];
       if(!history.length||!data){card.innerHTML='<div class="hash-head"><div><h3>Network Hash vs Pool Hash</h3><div class="muted small">Hashrate history is temporarily unavailable.</div></div></div><div class="hash-loading">Waiting for hashrate data…</div>';return;}
       const difficulty=Number(data.network_difficulty||0);
@@ -135,22 +146,20 @@
       const r=RANGES[selectedRange];
       const allSamples=saveNetworkSample(networkNow),cutoff=Math.floor(Date.now()/1000)-r.hours*3600,samples=allSamples.filter(x=>Number(x.ts)>=cutoff);
       const poolVals=history.map(x=>Number(x.hashrate||0)),netVals=history.map(x=>networkAt(samples,Number(x.ts||0),networkNow)),p=calcStats(poolVals),n=calcStats(netVals),share=networkNow>0?poolNow/networkNow*100:0;
+      const minerValue=currentMiners==null?'—':String(currentMiners);
       styles();
-      card.innerHTML=`<div class="hash-head"><div><h3>Network Hash vs Pool Hash</h3><div class="muted small">Pool and Yerbas network hashrate over the selected time range.</div></div><div class="hash-range">${Object.keys(RANGES).map(k=>`<button type="button" data-range="${k}" class="${k===selectedRange?'active':''}">${k}</button>`).join('')}</div></div><div class="hash-metrics"><div class="hash-metric"><span>Pool now</span><strong>${hashRate(poolNow)}</strong><small>${selectedRange} average ${hashRate(p.avg)}</small></div><div class="hash-metric"><span>Network now</span><strong>${hashRate(networkNow)}</strong><small>${selectedRange} average ${hashRate(n.avg)}</small></div><div class="hash-metric"><span>Pool share</span><strong>${share.toFixed(2)}%</strong><small>of current network hash</small></div><div class="hash-metric"><span>Peak pool</span><strong>${hashRate(p.peak)}</strong><small>${selectedRange} peak</small></div><div class="hash-metric"><span>Peak network</span><strong>${hashRate(n.peak)}</strong><small>${selectedRange} peak</small></div></div>${chart(history,samples,networkNow)}<div class="hash-legend"><span><i class="hash-dot pool"></i>Pool hashrate</span><span><i class="hash-dot net"></i>Network hashrate</span></div><div class="hash-footer"><span>Left scale: pool hashrate · Right scale: network hashrate</span><span>Updated ${new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',second:'2-digit'})}</span></div>`;
+      card.innerHTML=`<div class="hash-head"><div><h3>Network Hash vs Pool Hash</h3><div class="muted small">Pool and Yerbas network hashrate over the selected time range.</div></div><div class="hash-range">${Object.keys(RANGES).map(k=>`<button type="button" data-range="${k}" class="${k===selectedRange?'active':''}">${k}</button>`).join('')}</div></div><div class="hash-metrics"><div class="hash-metric"><span>Pool now</span><strong>${hashRate(poolNow)}</strong><small>${selectedRange} average ${hashRate(p.avg)}</small></div><div class="hash-metric"><span>Network now</span><strong>${hashRate(networkNow)}</strong><small>${selectedRange} average ${hashRate(n.avg)}</small></div><div class="hash-metric"><span>Pool share</span><strong>${share.toFixed(2)}%</strong><small>of current network hash</small></div><div class="hash-metric"><span>Miners</span><strong>${minerValue}</strong><small>active in the last hour</small></div><div class="hash-metric"><span>Peak pool</span><strong>${hashRate(p.peak)}</strong><small>${selectedRange} peak</small></div><div class="hash-metric"><span>Peak network</span><strong>${hashRate(n.peak)}</strong><small>${selectedRange} peak</small></div></div>${chart(history,samples,networkNow)}<div class="hash-legend"><span><i class="hash-dot pool"></i>Pool hashrate</span><span><i class="hash-dot net"></i>Network hashrate</span></div><div class="hash-footer"><span>Left scale: pool hashrate · Right scale: network hashrate</span><span>Updated ${new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',second:'2-digit'})}</span></div>`;
       bindRange(card);bindHover(card,history,samples,networkNow);
     }finally{busy=false;if(pending){pending=false;setTimeout(()=>render(true),0);}}
   }
 
   function install(){
     styles();
-    // Start the expensive history/RPC request immediately, in parallel with
-    // the rest of dashboard loading. By the time the chart card is inserted,
-    // its data is usually already waiting to be painted.
     preload=fetchSnapshot(selectedRange);
     const app=document.querySelector('main#app');let started=false;
-    const start=()=>{const card=combinedCard();if(!card)return false;if(!started){started=true;render();}return true;};
-    if(!start()&&app){const observer=new MutationObserver(()=>{if(start())observer.disconnect();});observer.observe(app,{childList:true,subtree:true});}
-    setInterval(()=>{preload=fetchSnapshot(selectedRange);render();},15000);
+    const start=()=>{if(started)return;const card=combinedCard();if(!card)return;started=true;render(true);setInterval(()=>render(false),60*1000);setInterval(()=>render(true),60*60*1000);};
+    const observer=new MutationObserver(start);if(app)observer.observe(app,{childList:true,subtree:true});
+    start();setTimeout(start,100);setTimeout(start,500);setTimeout(start,1200);
   }
-  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',install);else install();
+  install();
 })();
