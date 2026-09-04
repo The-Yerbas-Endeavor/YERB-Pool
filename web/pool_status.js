@@ -3,76 +3,25 @@
   let refreshBusy=false;
   let workerShareTimer=null;
   let workerLastShareAt=0;
-  let dashboardMinerObserver=null;
+  let dashboardMinerTimer=null;
 
   function ensureStyle(){
     if(document.getElementById('yerb-pool-status-style')) return;
     const style=document.createElement('style');
     style.id='yerb-pool-status-style';
     style.textContent=`
-      body{
-        padding-bottom:48px!important;
-      }
-      #yerb-pool-status{
-        position:fixed;
-        left:0;
-        right:0;
-        bottom:0;
-        z-index:1000;
-        border-top:1px solid #29352d;
-        background:rgba(18,23,19,.97);
-        box-shadow:0 -8px 24px rgba(0,0,0,.18);
-        backdrop-filter:blur(8px);
-        -webkit-backdrop-filter:blur(8px);
-      }
-      #yerb-pool-status .status-inner{
-        max-width:1600px;
-        margin:auto;
-        padding:9px 24px;
-        display:flex;
-        align-items:center;
-        gap:16px;
-        flex-wrap:wrap;
-        font-size:12px;
-        color:#b9c7bc;
-      }
-      #yerb-pool-status .status-item{
-        display:inline-flex;
-        gap:6px;
-        align-items:center;
-        white-space:nowrap;
-      }
-      #yerb-pool-status .status-dot{
-        width:8px;
-        height:8px;
-        border-radius:50%;
-        display:inline-block;
-        background:#777;
-        box-shadow:0 0 0 2px rgba(255,255,255,.03);
-      }
-      #yerb-pool-status .status-dot.ok{background:#65c466}
-      #yerb-pool-status .status-dot.warn{background:#e5b94c}
-      #yerb-pool-status .status-dot.bad{background:#e06b6b}
-      #yerb-pool-status a{color:inherit;text-decoration:none}
-      #yerb-pool-status a:hover{text-decoration:underline}
-      #yerb-pool-status .status-spacer{flex:1}
+      body{padding-bottom:48px!important}
+      #yerb-pool-status{position:fixed;left:0;right:0;bottom:0;z-index:1000;border-top:1px solid #29352d;background:rgba(18,23,19,.97);box-shadow:0 -8px 24px rgba(0,0,0,.18);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px)}
+      #yerb-pool-status .status-inner{max-width:1600px;margin:auto;padding:9px 24px;display:flex;align-items:center;gap:16px;flex-wrap:wrap;font-size:12px;color:#b9c7bc}
+      #yerb-pool-status .status-item{display:inline-flex;gap:6px;align-items:center;white-space:nowrap}
+      #yerb-pool-status .status-dot{width:8px;height:8px;border-radius:50%;display:inline-block;background:#777;box-shadow:0 0 0 2px rgba(255,255,255,.03)}
+      #yerb-pool-status .status-dot.ok{background:#65c466}#yerb-pool-status .status-dot.warn{background:#e5b94c}#yerb-pool-status .status-dot.bad{background:#e06b6b}
+      #yerb-pool-status a{color:inherit;text-decoration:none}#yerb-pool-status a:hover{text-decoration:underline}#yerb-pool-status .status-spacer{flex:1}
       #worker-hash-card .hash-metrics{grid-template-columns:repeat(4,minmax(130px,1fr))!important}
       @media(max-width:900px){#worker-hash-card .hash-metrics{grid-template-columns:repeat(2,minmax(130px,1fr))!important}}
       @media(max-width:520px){#worker-hash-card .hash-metrics{grid-template-columns:1fr!important}}
-      @media(max-width:700px){
-        body{padding-bottom:74px!important}
-        #yerb-pool-status .status-inner{
-          padding:8px 14px;
-          gap:7px 12px;
-          justify-content:center;
-          font-size:11px;
-        }
-        #yerb-pool-status .status-spacer{display:none}
-      }
-      @media(max-width:430px){
-        body{padding-bottom:92px!important}
-        #yerb-pool-status .status-inner{gap:6px 10px}
-      }
+      @media(max-width:700px){body{padding-bottom:74px!important}#yerb-pool-status .status-inner{padding:8px 14px;gap:7px 12px;justify-content:center;font-size:11px}#yerb-pool-status .status-spacer{display:none}}
+      @media(max-width:430px){body{padding-bottom:92px!important}#yerb-pool-status .status-inner{gap:6px 10px}}
     `;
     document.head.appendChild(style);
   }
@@ -99,12 +48,9 @@
   }
 
   function setHealth(id,label,online,warning){
-    const text=document.getElementById(id);
-    const dot=document.getElementById(id+'-dot');
+    const text=document.getElementById(id),dot=document.getElementById(id+'-dot');
     if(text) text.textContent=label;
-    if(dot){
-      dot.className='status-dot '+(online?'ok':warning?'warn':'bad');
-    }
+    if(dot) dot.className='status-dot '+(online?'ok':warning?'warn':'bad');
   }
 
   function formatCountdown(epoch){
@@ -112,11 +58,8 @@
     if(!target) return 'every 2h';
     const left=Math.max(0,Math.floor(target-Date.now()/1000));
     if(left<=0) return 'checking…';
-    const h=Math.floor(left/3600);
-    const m=Math.floor((left%3600)/60);
-    const s=left%60;
-    if(h>0) return `${h}h ${String(m).padStart(2,'0')}m`;
-    return `${m}m ${String(s).padStart(2,'0')}s`;
+    const h=Math.floor(left/3600),m=Math.floor((left%3600)/60),s=left%60;
+    return h>0?`${h}h ${String(m).padStart(2,'0')}m`:`${m}m ${String(s).padStart(2,'0')}s`;
   }
 
   function formatSince(epoch){
@@ -124,21 +67,20 @@
     if(!t) return 'Never';
     const age=Math.max(0,Math.floor(Date.now()/1000-t));
     if(age<60) return `${age}s ago`;
-    if(age<3600){
-      const m=Math.floor(age/60),s=age%60;
-      return `${m}m ${String(s).padStart(2,'0')}s ago`;
-    }
-    if(age<86400){
-      const h=Math.floor(age/3600),m=Math.floor((age%3600)/60);
-      return `${h}h ${String(m).padStart(2,'0')}m ago`;
-    }
-    const d=Math.floor(age/86400),h=Math.floor((age%86400)/3600);
-    return `${d}d ${h}h ago`;
+    if(age<3600){const m=Math.floor(age/60),s=age%60;return `${m}m ${String(s).padStart(2,'0')}s ago`}
+    if(age<86400){const h=Math.floor(age/3600),m=Math.floor((age%3600)/60);return `${h}h ${String(m).padStart(2,'0')}m ago`}
+    const d=Math.floor(age/86400),h=Math.floor((age%86400)/3600);return `${d}d ${h}h ago`;
+  }
+
+  function dashboardHashRoot(){
+    return document.querySelector('#combined-hash-card, .combined-hash-card');
   }
 
   function dashboardMinerCards(){
     if(location.pathname!=='/') return [];
-    return [...document.querySelectorAll('#combined-hash-card .hash-metric, .combined-hash-card .hash-metric')].filter(el=>{
+    const root=dashboardHashRoot();
+    if(!root) return [];
+    return [...root.querySelectorAll('.hash-metric')].filter(el=>{
       const label=el.querySelector('span')?.textContent?.trim();
       const detail=el.querySelector('small')?.textContent?.trim();
       return label==='Miners' || label==='Active miners' || detail==='tracked payout addresses';
@@ -158,50 +100,39 @@
       for(const duplicate of cards.slice(1)) duplicate.remove();
       return cards[0];
     }
-    const metrics=document.querySelector('#combined-hash-card .hash-metrics, .combined-hash-card .hash-metrics');
+    const root=dashboardHashRoot();
+    const metrics=root?.querySelector('.hash-metrics');
     if(!metrics) return null;
     const card=document.createElement('div');
-    card.id='dashboard-active-miners-card';
     card.className='hash-metric';
+    card.dataset.liveActiveMiners='1';
     card.innerHTML='<span>Active miners</span><strong>—</strong><small>active within the last hour</small>';
     const blockCard=[...metrics.querySelectorAll('.hash-metric')].find(el=>el.querySelector('span')?.textContent?.trim()==='Block ETA / Last found');
-    if(blockCard) metrics.insertBefore(card,blockCard);
-    else metrics.appendChild(card);
+    if(blockCard) metrics.insertBefore(card,blockCard); else metrics.appendChild(card);
     return card;
-  }
-
-  function hideStaleDashboardMiners(){
-    const card=ensureDashboardActiveMinerCard();
-    if(!card) return;
-    if(activeMinerCount()==null) card.style.visibility='hidden';
   }
 
   function updateDashboardActiveMiners(){
     if(location.pathname!=='/') return;
-    const active=activeMinerCount();
     const card=ensureDashboardActiveMinerCard();
     if(!card) return;
+    const active=activeMinerCount();
+    const label=card.querySelector('span'),value=card.querySelector('strong'),detail=card.querySelector('small');
+    if(label && label.textContent!=='Active miners') label.textContent='Active miners';
+    if(detail && detail.textContent!=='active within the last hour') detail.textContent='active within the last hour';
     if(active==null){
-      card.style.visibility='hidden';
+      if(value && value.textContent!=='—') value.textContent='—';
       return;
     }
-    const label=card.querySelector('span');
-    const value=card.querySelector('strong');
-    const detail=card.querySelector('small');
-    if(label) label.textContent='Active miners';
-    if(value) value.textContent=Number(active).toLocaleString();
-    if(detail) detail.textContent='active within the last hour';
+    const next=Number(active).toLocaleString();
+    if(value && value.textContent!==next) value.textContent=next;
     card.style.visibility='';
   }
 
-  function watchDashboardMinerCard(){
-    if(location.pathname!=='/' || dashboardMinerObserver || !document.body) return;
-    dashboardMinerObserver=new MutationObserver(()=>{
-      if(activeMinerCount()==null) hideStaleDashboardMiners();
-      else updateDashboardActiveMiners();
-    });
-    dashboardMinerObserver.observe(document.body,{childList:true,subtree:true});
-    hideStaleDashboardMiners();
+  function startDashboardMinerTimer(){
+    if(location.pathname!=='/' || dashboardMinerTimer) return;
+    updateDashboardActiveMiners();
+    dashboardMinerTimer=setInterval(updateDashboardActiveMiners,2000);
   }
 
   function mergeWorkerShareCards(){
@@ -212,14 +143,13 @@
     const accepted=cards.find(card=>card.querySelector('span')?.textContent.trim()==='Accepted');
     const rejected=cards.find(card=>card.querySelector('span')?.textContent.trim()==='Rejected');
     if(!accepted||!rejected) return;
-
     const acceptedValue=accepted.querySelector('strong')?.textContent.trim()||'0';
     const rejectedValue=rejected.querySelector('strong')?.textContent.trim()||'0';
     const rejectDetail=rejected.querySelector('small')?.textContent.trim()||'';
     accepted.querySelector('span').textContent='Accepted / Rejected';
     accepted.querySelector('strong').textContent=`${acceptedValue} / ${rejectedValue}`;
     const detail=accepted.querySelector('small');
-    if(detail) detail.textContent=rejectDetail ? `accepted / rejected · ${rejectDetail}` : 'accepted / rejected';
+    if(detail) detail.textContent=rejectDetail?`accepted / rejected · ${rejectDetail}`:'accepted / rejected';
     rejected.remove();
   }
 
@@ -230,35 +160,19 @@
     mergeWorkerShareCards();
     let card=document.getElementById('worker-last-share-card');
     if(!card){
-      card=document.createElement('div');
-      card.id='worker-last-share-card';
-      card.className='hash-metric';
+      card=document.createElement('div');card.id='worker-last-share-card';card.className='hash-metric';
       card.innerHTML='<span>Last share submitted</span><strong id="worker-last-share-value">—</strong><small id="worker-last-share-time">waiting for share data</small>';
-      const efficiency=[...metrics.querySelectorAll('.hash-metric')].find(x=>x.querySelector('span')?.textContent.trim()==='Efficiency');
-      if(efficiency) metrics.insertBefore(card,efficiency);
-      else metrics.appendChild(card);
+      metrics.appendChild(card);
     }
-    const value=document.getElementById('worker-last-share-value');
-    const detail=document.getElementById('worker-last-share-time');
+    const value=document.getElementById('worker-last-share-value'),detail=document.getElementById('worker-last-share-time');
     if(value) value.textContent=formatSince(workerLastShareAt);
-    if(detail){
-      detail.textContent=workerLastShareAt
-        ? new Date(workerLastShareAt*1000).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'})
-        : 'no submitted share recorded';
-    }
+    if(detail) detail.textContent=workerLastShareAt?new Date(workerLastShareAt*1000).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'}):'no submitted share recorded';
   }
 
   async function refreshWorkerLastShare(){
     if(!location.pathname.startsWith('/worker/')) return;
-    const id=location.pathname.slice('/worker/'.length);
-    if(!id) return;
-    try{
-      const r=await fetch(`/api/worker/${encodeURIComponent(id)}/stats?hours=1&bucket=60`,{cache:'no-store'});
-      if(r.ok){
-        const data=await r.json();
-        workerLastShareAt=Number(data.last_share_at||0);
-      }
-    }catch(_){}
+    const id=location.pathname.slice('/worker/'.length);if(!id) return;
+    try{const r=await fetch(`/api/worker/${encodeURIComponent(id)}/stats?hours=1&bucket=60`,{cache:'no-store'});if(r.ok){const data=await r.json();workerLastShareAt=Number(data.last_share_at||0)}}catch(_){}
     renderWorkerLastShare();
   }
 
@@ -266,46 +180,26 @@
     if(!location.pathname.startsWith('/worker/')) return;
     refreshWorkerLastShare();
     if(workerShareTimer) return;
-    workerShareTimer=setInterval(()=>{
-      renderWorkerLastShare();
-    },1000);
+    workerShareTimer=setInterval(renderWorkerLastShare,1000);
     setInterval(refreshWorkerLastShare,15000);
   }
 
   function render(){
-    ensureStyle();
-    if(!ensureStrip()) return;
-    const p=state.pool||{};
-    const h=state.health||{};
-
-    const stratum=h.stratum||{};
+    ensureStyle();if(!ensureStrip()) return;
+    const p=state.pool||{},h=state.health||{};
+    const stratum=h.stratum||{},wallet=h.wallet||{},accounting=h.accounting||{};
     setHealth('status-stratum',stratum.online?'Stratum Online':'Stratum Offline',!!stratum.online,false);
-
-    const wallet=h.wallet||{};
     setHealth('status-wallet',wallet.online?'Wallet Online':'Wallet Offline',!!wallet.online,false);
-
-    const accounting=h.accounting||{};
-    if(accounting.ok===true){
-      setHealth('status-accounting','Accounting OK',true,false);
-    }else if(accounting.ok===false){
-      setHealth('status-accounting','Accounting Check',false,true);
-    }else{
-      setHealth('status-accounting','Accounting —',false,true);
-    }
-
-    const workers=document.getElementById('status-workers');
-    if(workers) workers.textContent=Number(p.active_workers||0).toLocaleString();
-    const fee=document.getElementById('status-fee');
-    if(fee) fee.textContent=Number(p.pool_fee_percent||0).toFixed(2)+'%';
-    const payout=document.getElementById('status-payout');
-    if(payout) payout.textContent=formatCountdown(p.next_payout_check_at);
+    if(accounting.ok===true)setHealth('status-accounting','Accounting OK',true,false);else if(accounting.ok===false)setHealth('status-accounting','Accounting Check',false,true);else setHealth('status-accounting','Accounting —',false,true);
+    const workers=document.getElementById('status-workers');if(workers) workers.textContent=Number(p.active_workers||0).toLocaleString();
+    const fee=document.getElementById('status-fee');if(fee) fee.textContent=Number(p.pool_fee_percent||0).toFixed(2)+'%';
+    const payout=document.getElementById('status-payout');if(payout) payout.textContent=formatCountdown(p.next_payout_check_at);
     updateDashboardActiveMiners();
     renderWorkerLastShare();
   }
 
   async function refresh(){
-    if(refreshBusy) return;
-    refreshBusy=true;
+    if(refreshBusy) return;refreshBusy=true;
     try{
       const [poolResult,healthResult,summaryResult,minersResult]=await Promise.allSettled([
         fetch('/api/pool',{cache:'no-store'}).then(r=>r.ok?r.json():Promise.reject(new Error('pool status unavailable'))),
@@ -321,26 +215,14 @@
         state.activeMiners=Array.isArray(miners)?miners.length:(Array.isArray(miners?.items)?miners.items.length:null);
       }
       render();
-    }finally{
-      refreshBusy=false;
-    }
+    }finally{refreshBusy=false}
   }
 
   function install(){
-    ensureStyle();
-    ensureStrip();
-    watchDashboardMinerCard();
-    hideStaleDashboardMiners();
-    render();
-    refresh();
-    setHealthWorkerTimer();
+    ensureStyle();ensureStrip();render();refresh();startDashboardMinerTimer();setHealthWorkerTimer();
     setInterval(refresh,15000);
-    setInterval(()=>{
-      const payout=document.getElementById('status-payout');
-      if(payout && state.pool) payout.textContent=formatCountdown(state.pool.next_payout_check_at);
-    },1000);
+    setInterval(()=>{const payout=document.getElementById('status-payout');if(payout&&state.pool)payout.textContent=formatCountdown(state.pool.next_payout_check_at)},1000);
   }
 
-  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',install);
-  else install();
+  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',install);else install();
 })();
