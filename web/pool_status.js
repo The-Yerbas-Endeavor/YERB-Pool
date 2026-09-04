@@ -138,7 +138,7 @@
 
   function dashboardMinerCards(){
     if(location.pathname!=='/') return [];
-    return [...document.querySelectorAll('#combined-hash-card .hash-metric')].filter(el=>{
+    return [...document.querySelectorAll('#combined-hash-card .hash-metric, .combined-hash-card .hash-metric')].filter(el=>{
       const label=el.querySelector('span')?.textContent?.trim();
       const detail=el.querySelector('small')?.textContent?.trim();
       return label==='Miners' || label==='Active miners' || detail==='tracked payout addresses';
@@ -158,9 +158,10 @@
       for(const duplicate of cards.slice(1)) duplicate.remove();
       return cards[0];
     }
-    const metrics=document.querySelector('#combined-hash-card .hash-metrics');
+    const metrics=document.querySelector('#combined-hash-card .hash-metrics, .combined-hash-card .hash-metrics');
     if(!metrics) return null;
     const card=document.createElement('div');
+    card.id='dashboard-active-miners-card';
     card.className='hash-metric';
     card.innerHTML='<span>Active miners</span><strong>—</strong><small>active within the last hour</small>';
     const blockCard=[...metrics.querySelectorAll('.hash-metric')].find(el=>el.querySelector('span')?.textContent?.trim()==='Block ETA / Last found');
