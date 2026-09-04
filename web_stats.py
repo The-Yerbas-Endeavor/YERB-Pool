@@ -145,13 +145,18 @@ def _network_sampler_loop():
 def api_summary():
     now = int(time.time())
     cutoff = now - ACTIVE_WINDOW
+    active_miner_cutoff = now - 3600
     with base.db() as con:
         accounts = base.one(con, "SELECT COUNT(*) accounts, COALESCE(SUM(balance_atomic),0) balance_atomic, COALESCE(SUM(immature_balance_atomic),0) immature_atomic FROM accounts")
+        active_miners = base.one(con, """SELECT COUNT(DISTINCT a.id) active_miners
+               FROM accounts a JOIN workers w ON w.account_id=a.id
+               WHERE a.enabled=1 AND w.last_seen_at>=?""", (active_miner_cutoff,))
         shares = base.one(con, "SELECT COUNT(*) shares, COALESCE(SUM(CASE WHEN accepted=1 THEN 1 ELSE 0 END),0) accepted, COALESCE(SUM(CASE WHEN accepted=0 THEN 1 ELSE 0 END),0) rejected FROM shares")
         workers = base.one(con, """SELECT (SELECT COUNT(*) FROM workers) workers, COUNT(DISTINCT s.worker_id) active_workers FROM shares s WHERE s.accepted=1 AND s.worker_id IS NOT NULL AND s.ts>=?""", (cutoff,))
         blocks = base.one(con, "SELECT COUNT(*) blocks, COALESCE(SUM(CASE WHEN status='mature' THEN 1 ELSE 0 END),0) mature, COALESCE(SUM(CASE WHEN status IN ('submitted','confirmed') THEN 1 ELSE 0 END),0) pending FROM blocks")
         payouts = base.one(con, "SELECT COUNT(*) payouts, COALESCE(SUM(CASE WHEN status='sent' THEN total_atomic ELSE 0 END),0) paid_atomic FROM payouts")
 
+    accounts["active_miners"] = int(active_miners.get("active_miners") or 0)
     accounts["miner_balance_atomic"] = int(accounts.get("balance_atomic") or 0)
     wallet_atomic = _wallet_balance_atomic()
     if wallet_atomic is not None:
