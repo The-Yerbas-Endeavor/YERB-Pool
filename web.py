@@ -105,6 +105,8 @@ def api_luck():
 
 
 def api_summary():
+    now = int(time.time())
+    active_cutoff = now - 3600
     with db() as con:
         accounts = one(con, """SELECT COUNT(*) accounts,
             COALESCE(SUM(a.balance_atomic),0) balance_atomic,
@@ -114,6 +116,14 @@ def api_summary():
                 SELECT 1 FROM settings s
                 WHERE s.key='pool_treasury_address' AND s.value=a.address
             )""")
+        active_miners = one(con, """SELECT COUNT(DISTINCT a.id) active_miners
+            FROM accounts a JOIN workers w ON w.account_id=a.id
+            WHERE a.enabled=1 AND w.last_seen_at>=?
+              AND NOT EXISTS (
+                SELECT 1 FROM settings s
+                WHERE s.key='pool_treasury_address' AND s.value=a.address
+              )""", (active_cutoff,))
+        accounts["active_miners"] = int(active_miners.get("active_miners") or 0)
         shares = one(con, "SELECT COUNT(*) shares, COALESCE(SUM(CASE WHEN accepted=1 THEN 1 ELSE 0 END),0) accepted, COALESCE(SUM(CASE WHEN accepted=0 THEN 1 ELSE 0 END),0) rejected FROM shares")
         workers = one(con, "SELECT COUNT(*) workers, COALESCE(SUM(CASE WHEN last_seen_at >= strftime('%s','now')-600 THEN 1 ELSE 0 END),0) active_workers FROM workers")
         blocks = one(con, "SELECT COUNT(*) blocks, COALESCE(SUM(CASE WHEN status='mature' THEN 1 ELSE 0 END),0) mature, COALESCE(SUM(CASE WHEN status IN ('submitted','confirmed') THEN 1 ELSE 0 END),0) pending FROM blocks")
@@ -137,16 +147,21 @@ def api_blocks(status=None, limit=100):
 
 
 def api_miners(limit=250):
+    active_cutoff = int(time.time()) - 3600
     with db() as con:
         return rows(con, """SELECT a.address,a.balance_atomic,a.immature_balance_atomic,a.total_earned_atomic,a.total_paid_atomic,
             COUNT(w.id) worker_count, COALESCE(MAX(w.last_seen_at),0) last_seen_at,
             COALESCE(SUM(w.accepted_shares),0) accepted_shares, COALESCE(SUM(w.rejected_shares),0) rejected_shares
             FROM accounts a LEFT JOIN workers w ON w.account_id=a.id
-            WHERE NOT EXISTS (
+            WHERE a.enabled=1
+              AND NOT EXISTS (
                 SELECT 1 FROM settings s
                 WHERE s.key='pool_treasury_address' AND s.value=a.address
             )
-            GROUP BY a.id ORDER BY last_seen_at DESC LIMIT ?""", (min(max(int(limit), 1), 1000),))
+            GROUP BY a.id
+            HAVING COALESCE(MAX(w.last_seen_at),0) >= ?
+            ORDER BY last_seen_at DESC LIMIT ?""",
+            (active_cutoff, min(max(int(limit), 1), 1000)))
 
 
 def api_workers(limit=500):
