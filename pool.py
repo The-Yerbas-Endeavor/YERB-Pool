@@ -39,6 +39,44 @@ async def main():
 
     db.allocate_block_immature = allocate_block_immature_with_fee
 
+    # Defensive payout filtering: only valid Yerbas addresses may enter a payout
+    # record. This keeps one malformed/legacy account from poisoning sendmany and
+    # keeps payout_items consistent with the recipients that are actually sent.
+    original_eligible_payout_accounts = db.eligible_payout_accounts
+
+    def eligible_validated_payout_accounts(default_minimum_atomic):
+        accounts = original_eligible_payout_accounts(default_minimum_atomic)
+        valid = []
+        for account in accounts:
+            address = str(account.get("address") or "").strip()
+            if not address or address.lower().startswith("solo:"):
+                logging.error(
+                    "Skipping invalid payout account id=%s address=%r",
+                    account.get("id"),
+                    address,
+                )
+                continue
+            try:
+                info = rpc.validateaddress(address)
+            except Exception:
+                logging.exception(
+                    "Unable to validate payout address id=%s address=%s",
+                    account.get("id"),
+                    address,
+                )
+                raise
+            if not isinstance(info, dict) or not bool(info.get("isvalid")):
+                logging.error(
+                    "Skipping invalid Yerbas payout address id=%s address=%s",
+                    account.get("id"),
+                    address,
+                )
+                continue
+            valid.append(account)
+        return valid
+
+    db.eligible_payout_accounts = eligible_validated_payout_accounts
+
     jobs = JobManager(rpc, cfg)
     payouts = PayoutManager(cfg, rpc, db)
     server = ControlledStratumServer(cfg, rpc, jobs, db, payouts)
