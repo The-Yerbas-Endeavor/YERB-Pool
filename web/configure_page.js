@@ -9,7 +9,7 @@
       group:'hybrid',
       worker:'yerbas',
       url:'https://github.com/The-Yerbas-Endeavor/Yerbas-Miner/releases',
-      command:'yerbas-miner --url stratum+tcp://pool.yerbas.org:3333 --user YOUR_YERB_ADDRESS.yerbas --pass x'
+      command:'yerbas-miner --pool stratum+tcp://pool.yerbas.org:3333 --user YOUR_YERB_ADDRESS --worker yerbas --password x'
     },
     {
       name:'cpuminer-opt-gr',
