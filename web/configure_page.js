@@ -4,6 +4,14 @@
 
   const commands=[
     {
+      name:'Yerbas Miner',
+      type:'CPU + NVIDIA GPU',
+      group:'hybrid',
+      worker:'yerbas',
+      url:'https://github.com/The-Yerbas-Endeavor/Yerbas-Miner/releases',
+      command:'yerbas-miner --url stratum+tcp://pool.yerbas.org:3333 --user YOUR_YERB_ADDRESS.yerbas --pass x'
+    },
+    {
       name:'cpuminer-opt-gr',
       type:'CPU',
       group:'cpu',
@@ -174,6 +182,12 @@
         <section class="section-copy">
           <h2>Prebuilt Miner Commands</h2>
           <div class="muted">Password is <code>x</code>. Worker names are optional and can be reused across compatible miners.</div>
+        </section>
+
+        <section>
+          <h2>Hybrid Miners</h2>
+          <div class="muted">Hybrid miners can use both CPU and supported GPU hardware from one miner.</div>
+          <div class="command-list">${commandCards('hybrid')}</div>
         </section>
 
         <section>
