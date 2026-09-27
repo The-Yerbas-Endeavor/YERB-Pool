@@ -22,6 +22,16 @@ ACTIVE_WINDOW = 600
 HASHRATE_WINDOW = 120
 NETWORK_SAMPLE_INTERVAL = 60
 NETWORK_SAMPLE_RETENTION = 8 * 86400
+CORE_SNAPSHOT_INTERVAL = 10
+WALLET_SNAPSHOT_INTERVAL = 10
+SUMMARY_CACHE_SECONDS = 5
+LUCK_CACHE_SECONDS = 5
+
+_cache_lock = threading.RLock()
+_core_snapshot_cache = {"network_difficulty": None, "network_hashrate": None, "generated_at": 0}
+_wallet_balance_cache = {"balance_atomic": None, "generated_at": 0}
+_summary_cache = {"value": None, "generated_at": 0}
+_luck_cache = {"value": None, "generated_at": 0}
 
 
 @contextlib.contextmanager
@@ -49,7 +59,7 @@ def _hashrate_from_diff(accepted_diff, window_seconds=HASHRATE_WINDOW):
     )
 
 
-def _wallet_balance_atomic():
+def _fetch_wallet_balance_atomic():
     try:
         info = base.rpc_call("getwalletinfo")
         if isinstance(info, dict) and info.get("balance") is not None:
@@ -63,6 +73,22 @@ def _wallet_balance_atomic():
     except Exception:
         pass
     return None
+
+
+def _wallet_balance_atomic():
+    """Return the background-refreshed wallet balance without blocking a request."""
+    with _cache_lock:
+        return _wallet_balance_cache.get("balance_atomic")
+
+
+def _wallet_sampler_loop():
+    while True:
+        value = _fetch_wallet_balance_atomic()
+        if value is not None:
+            with _cache_lock:
+                _wallet_balance_cache["balance_atomic"] = value
+                _wallet_balance_cache["generated_at"] = int(time.time())
+        time.sleep(WALLET_SNAPSHOT_INTERVAL)
 
 
 def _record_network_hashrate(value):
@@ -108,8 +134,8 @@ def _snapshot_result(difficulty, network_hashrate):
     return result
 
 
-def _mining_snapshot():
-    """Fetch difficulty and network hashrate with one Core RPC when possible."""
+def _fetch_mining_snapshot():
+    """Refresh Core mining data. Only the background sampler should call this."""
     try:
         info = base.rpc_call("getmininginfo")
         if isinstance(info, dict):
@@ -128,22 +154,36 @@ def _mining_snapshot():
     return _snapshot_result(difficulty, network_hashrate)
 
 
+def _mining_snapshot():
+    """Return cached Core mining data immediately; never block an HTTP request."""
+    with _cache_lock:
+        return dict(_core_snapshot_cache)
+
+
 def _network_hashrate():
     return _mining_snapshot().get("network_hashrate")
 
 
 def _network_sampler_loop():
-    """Continuously collect network hashrate even when no dashboard is open."""
+    """Keep one authoritative Core snapshot warm for all public endpoints."""
     while True:
         try:
-            _mining_snapshot()
+            snapshot = _fetch_mining_snapshot()
+            with _cache_lock:
+                _core_snapshot_cache.update(snapshot)
+                _core_snapshot_cache["generated_at"] = int(time.time())
         except Exception:
             pass
-        time.sleep(NETWORK_SAMPLE_INTERVAL)
+        time.sleep(CORE_SNAPSHOT_INTERVAL)
 
 
 def api_summary():
     now = int(time.time())
+    with _cache_lock:
+        cached = _summary_cache.get("value")
+        cached_at = int(_summary_cache.get("generated_at") or 0)
+        if cached is not None and now - cached_at < SUMMARY_CACHE_SECONDS:
+            return cached
     cutoff = now - ACTIVE_WINDOW
     active_miner_cutoff = now - 3600
     with base.db() as con:
@@ -168,7 +208,11 @@ def api_summary():
     else:
         accounts["wallet_rpc_ok"] = False
 
-    return {"pool_address": str(base.CFG.get("pool_address", "") or ""), "pool_fee_percent": get_pool_fee_percent(base.CFG), "accounts": accounts, "shares": shares, "workers": workers, "blocks": blocks, "payouts": payouts}
+    result = {"pool_address": str(base.CFG.get("pool_address", "") or ""), "pool_fee_percent": get_pool_fee_percent(base.CFG), "accounts": accounts, "shares": shares, "workers": workers, "blocks": blocks, "payouts": payouts}
+    with _cache_lock:
+        _summary_cache["value"] = result
+        _summary_cache["generated_at"] = now
+    return result
 
 
 def api_workers(limit=500):
@@ -317,6 +361,11 @@ def api_hashrate_chart(hours=24, bucket_seconds=600):
 
 def api_luck():
     now = int(time.time())
+    with _cache_lock:
+        cached = _luck_cache.get("value")
+        cached_at = int(_luck_cache.get("generated_at") or 0)
+        if cached is not None and now - cached_at < LUCK_CACHE_SECONDS:
+            return cached
     pool_hashrate = _recent_pool_hashrate()
     with base.db() as con:
         last_block = base.one(con, "SELECT height,submitted_at FROM blocks ORDER BY id DESC LIMIT 1")
@@ -339,11 +388,15 @@ def api_luck():
         import math
         chance = (1.0 - math.exp(-effort_ratio)) * 100.0
         eta_seconds = (float(network_diff) * base.DIFF1_HASHES / pool_hashrate if pool_hashrate > 0 else None)
-    return {"pool_hashrate": pool_hashrate, "hashrate_window_seconds": HASHRATE_WINDOW, "network_difficulty": network_diff,
+    result = {"pool_hashrate": pool_hashrate, "hashrate_window_seconds": HASHRATE_WINDOW, "network_difficulty": network_diff,
         "network_hashrate": network_hashrate, "eta_seconds": eta_seconds, "round_start": round_start,
         "round_seconds": max(0, now - round_start), "round_accepted_shares": int(round_stats.get("accepted_shares") or 0),
         "round_stratum_difficulty": round_diff, "round_effort_percent": effort_ratio * 100.0,
         "chance_percent": chance, "last_block_height": last_block.get("height") if last_block else None}
+    with _cache_lock:
+        _luck_cache["value"] = result
+        _luck_cache["generated_at"] = now
+    return result
 
 
 def api_shares(status=None, address=None, limit=250):
@@ -372,6 +425,7 @@ base.api_account = api_account
 base.api_luck = api_luck
 base.api_shares = api_shares
 threading.Thread(target=_network_sampler_loop, name="network-hashrate-sampler", daemon=True).start()
+threading.Thread(target=_wallet_sampler_loop, name="wallet-balance-sampler", daemon=True).start()
 
 
 class LiveHandler(base.Handler):
