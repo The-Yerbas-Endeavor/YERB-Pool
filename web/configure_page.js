@@ -97,6 +97,14 @@
       .configure-page .copy-command,.configure-page .copy-stratum{cursor:pointer;background:#1d2a20;color:#b9e6bb;border:1px solid #35553d;border-radius:6px;padding:8px 11px;font-weight:700}
       .configure-page .copy-command:hover,.configure-page .copy-stratum:hover{border-color:var(--yerb,#65c466);color:#e9f7ea}
       .configure-page .section-copy{margin-top:32px}
+      .configure-page .recommended-card{margin-top:14px;padding:20px;border:1px solid rgba(101,196,102,.7);border-radius:12px;background:linear-gradient(145deg,#1b2b1e,#121813);box-shadow:0 0 0 1px rgba(101,196,102,.08),0 12px 30px rgba(0,0,0,.18)}
+      .configure-page .recommended-head{display:flex;justify-content:space-between;align-items:flex-start;gap:14px;flex-wrap:wrap;margin-bottom:12px}
+      .configure-page .recommended-title{font-size:20px;font-weight:800;color:#eefbef}
+      .configure-page .recommended-badges{display:flex;gap:7px;flex-wrap:wrap;margin-top:7px}
+      .configure-page .recommended-badge{font-size:11px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;border:1px solid #4e8756;border-radius:999px;padding:4px 8px;color:#bff2c3;background:#17251a}
+      .configure-page .download-release{display:inline-block;padding:9px 13px;border-radius:7px;background:#2d7138;color:#fff;text-decoration:none;font-weight:800;border:1px solid #65c466}
+      .configure-page .download-release:hover{background:#368544;color:#fff;text-decoration:none}
+      .configure-page .recommended-copy{color:#aebcaf;margin-bottom:13px}
       @media(max-width:700px){
         .configure-page .quick-grid{grid-template-columns:1fr}
         .configure-page .command-row{grid-template-columns:1fr}
@@ -185,9 +193,22 @@
         </section>
 
         <section>
-          <h2>Hybrid Miners</h2>
-          <div class="muted">Hybrid miners can use both CPU and supported GPU hardware from one miner.</div>
-          <div class="command-list">${commandCards('hybrid')}</div>
+          <h2>Recommended Hybrid Miner</h2>
+          <div class="recommended-card">
+            <div class="recommended-head">
+              <div>
+                <div class="recommended-title">Yerbas Miner</div>
+                <div class="recommended-badges">
+                  <span class="recommended-badge">Recommended</span>
+                  <span class="recommended-badge">Hybrid</span>
+                  <span class="recommended-badge">CPU + NVIDIA GPU</span>
+                </div>
+              </div>
+              <a class="download-release" href="https://github.com/The-Yerbas-Endeavor/Yerbas-Miner/releases/latest" target="_blank" rel="noopener noreferrer">Download latest release ↗</a>
+            </div>
+            <div class="recommended-copy">Native Yerbas GhostRider miner with combined CPU and NVIDIA CUDA mining support. Your payout address and worker name below are applied automatically.</div>
+            <div class="command-list">${commandCards('hybrid')}</div>
+          </div>
         </section>
 
         <section>
