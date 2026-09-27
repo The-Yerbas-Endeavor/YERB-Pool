@@ -193,13 +193,12 @@
         </section>
 
         <section>
-          <h2>Recommended Hybrid Miner</h2>
+          <h2>Hybrid Miner</h2>
           <div class="recommended-card">
             <div class="recommended-head">
               <div>
                 <div class="recommended-title">Yerbas Miner</div>
                 <div class="recommended-badges">
-                  <span class="recommended-badge">Recommended</span>
                   <span class="recommended-badge">Hybrid</span>
                   <span class="recommended-badge">CPU + NVIDIA GPU</span>
                 </div>
