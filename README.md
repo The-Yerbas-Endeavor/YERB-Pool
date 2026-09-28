@@ -272,3 +272,8 @@ sudo -u yerbpool python3 scripts/check-accounting.py
 ```
 
 For the production baseline, both should report healthy accounting before further development continues.
+
+
+## Pool-monitor compatibility
+
+Public read-only monitoring endpoints are exposed through compatibility aliases such as `/api/stats`, `/api/status`, `/api/pools`, and `/api/network`. On HTTPS-enabled installations, `scripts/install-pool-monitor-http-compat.sh` can allow only those harmless monitoring endpoints to answer directly over HTTP for external mining aggregators that do not follow HTTP-to-HTTPS redirects; all other HTTP traffic continues to redirect to HTTPS.

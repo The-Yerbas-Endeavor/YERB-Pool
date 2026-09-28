@@ -299,7 +299,22 @@ server {
     listen 80;
     listen [::]:80;
     server_name ${domain};
-    return 301 https://\$host\$request_uri;
+
+    # Keep the public, read-only pool-monitor API reachable without a redirect.
+    # Some mining aggregators probe HTTP endpoints but do not follow 301s.
+    location ~ ^/api/(?:summary|stats|status|pool_stats|poolstats|pools|luck|health|blocks|network(?:/stats)?|pool/stats)$ {
+        proxy_pass http://127.0.0.1:8080;
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_read_timeout 30s;
+    }
+
+    location / {
+        return 301 https://\$host\$request_uri;
+    }
 }
 
 server {
