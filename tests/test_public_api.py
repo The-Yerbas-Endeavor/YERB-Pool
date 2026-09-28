@@ -215,3 +215,34 @@ class PublicApiTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+    def test_pool_monitor_compatibility_shapes(self):
+        summary = {
+            "height": 1128957,
+            "pool_address": "yPool",
+            "pool_fee_percent": 0.5,
+            "accounts": {"accounts": 4, "active_miners": 5},
+            "workers": {"workers": 63, "active_workers": 4},
+            "blocks": {"height": 1128957},
+            "network_difficulty": 0.001698,
+            "network_hashrate": 57347.04,
+            "network": {"height": 1128957, "difficulty": 0.001698, "hashrate": 57347.04},
+            "pool": {"address": "yPool", "fee_percent": 0.5, "hashrate": 3400.83},
+            "coin": {"name": "Yerbas", "symbol": "YERB", "algorithm": "GhostRider"},
+            "round": {"last_pool_block_height": 1128950},
+        }
+        compat = api.pool_monitor_compat(summary)
+        self.assertEqual(compat["height"], 1128957)
+        self.assertEqual(compat["block_height"], 1128957)
+        self.assertEqual(compat["network_height"], 1128957)
+        self.assertEqual(compat["blockHeight"], 1128957)
+        self.assertEqual(compat["network"]["height"], 1128957)
+        self.assertEqual(compat["pool_hashrate"], 3400.83)
+        self.assertEqual(compat["active_miners"], 5)
+        self.assertEqual(compat["active_workers"], 4)
+
+        pools = api.miningcore_pools_compat(summary)
+        self.assertEqual(pools["pools"][0]["networkStats"]["blockHeight"], 1128957)
+        self.assertEqual(pools["pools"][0]["poolStats"]["poolHashrate"], 3400.83)
+        self.assertEqual(pools["pools"][0]["coin"]["symbol"], "YERB")

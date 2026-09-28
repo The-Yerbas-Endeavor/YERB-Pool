@@ -122,7 +122,13 @@ def public_summary():
             "hashrate_window_seconds": int(luck.get("hashrate_window_seconds") or 120),
             "stratum": "stratum+tcp://pool.yerbas.org:3333",
         }
+        height = result.get("height") or (result.get("blocks") or {}).get("height")
+        result["block_height"] = height
+        result["network_height"] = height
+        result["blockHeight"] = height
+        result["networkHeight"] = height
         result["network"] = {
+            "height": height,
             "difficulty": luck.get("network_difficulty"),
             "hashrate": luck.get("network_hashrate"),
         }
@@ -145,6 +151,96 @@ def public_summary():
 
 admin.live.api_summary = public_summary
 admin.live.base.api_summary = public_summary
+
+
+POOL_MONITOR_COMPAT_PATHS = {
+    "/api/stats",
+    "/api/status",
+    "/api/pool_stats",
+    "/api/pool/stats",
+    "/api/poolstats",
+    "/api/network",
+    "/api/network/stats",
+}
+
+
+def pool_monitor_compat(summary=None):
+    """Return a broad, read-only compatibility shape for external pool monitors."""
+    source = summary if summary is not None else public_summary()
+    result = dict(source)
+    accounts = dict(source.get("accounts") or {})
+    workers = dict(source.get("workers") or {})
+    pool = dict(source.get("pool") or {})
+    network = dict(source.get("network") or {})
+    round_data = dict(source.get("round") or {})
+    blocks = dict(source.get("blocks") or {})
+
+    height = (
+        source.get("height")
+        or source.get("block_height")
+        or source.get("network_height")
+        or network.get("height")
+        or blocks.get("height")
+    )
+    pool_hashrate = pool.get("hashrate")
+    network_hashrate = source.get("network_hashrate", network.get("hashrate"))
+    network_difficulty = source.get("network_difficulty", network.get("difficulty"))
+    miners = accounts.get("active_miners", accounts.get("accounts", 0))
+    active_workers = workers.get("active_workers", workers.get("workers", 0))
+
+    result.update({
+        "height": height,
+        "block_height": height,
+        "blockHeight": height,
+        "network_height": height,
+        "networkHeight": height,
+        "hashrate": pool_hashrate,
+        "pool_hashrate": pool_hashrate,
+        "miners": miners,
+        "active_miners": miners,
+        "active_workers": active_workers,
+        "network_hashrate": network_hashrate,
+        "network_difficulty": network_difficulty,
+        "difficulty": network_difficulty,
+        "last_pool_block_height": round_data.get("last_pool_block_height"),
+    })
+    result["network"] = {
+        **network,
+        "height": height,
+        "hashrate": network_hashrate,
+        "difficulty": network_difficulty,
+    }
+    return result
+
+
+def miningcore_pools_compat(summary=None):
+    """Expose the minimum MiningCore-style pool/network shape used by autodiscovery probes."""
+    compat = pool_monitor_compat(summary)
+    pool = dict(compat.get("pool") or {})
+    coin = dict(compat.get("coin") or {})
+    return {
+        "pools": [{
+            "id": "yerbas",
+            "coin": {
+                "name": coin.get("name", "Yerbas"),
+                "type": coin.get("symbol", "YERB"),
+                "symbol": coin.get("symbol", "YERB"),
+                "algorithm": coin.get("algorithm", "GhostRider"),
+            },
+            "poolStats": {
+                "connectedMiners": compat.get("active_miners", 0),
+                "connectedWorkers": compat.get("active_workers", 0),
+                "poolHashrate": compat.get("pool_hashrate"),
+            },
+            "networkStats": {
+                "blockHeight": compat.get("height"),
+                "networkDifficulty": compat.get("network_difficulty"),
+                "networkHashrate": compat.get("network_hashrate"),
+            },
+            "poolAddress": pool.get("address", compat.get("pool_address", "")),
+            "poolFeePercent": pool.get("fee_percent", compat.get("pool_fee_percent", 0)),
+        }]
+    }
 
 
 def api_blocks_enhanced(status=None, limit=100, offset=0):
@@ -287,6 +383,11 @@ def api_help():
         ],
         "endpoints": [
             {"method": "GET", "path": "/api/summary", "description": "Complete pool, network, round and accounting summary"},
+            {"method": "GET", "path": "/api/stats", "description": "Pool-monitor compatibility alias"},
+            {"method": "GET", "path": "/api/status", "description": "Pool-monitor compatibility alias"},
+            {"method": "GET", "path": "/api/pools", "description": "MiningCore-style autodiscovery compatibility response"},
+            {"method": "GET", "path": "/api/network", "description": "Pool-monitor compatibility alias"},
+            {"method": "GET", "path": "/api/network/stats", "description": "Pool-monitor compatibility alias"},
             {"method": "GET", "path": "/api/health", "description": "Stratum, wallet, database and accounting health"},
             {"method": "GET", "path": "/api/luck", "description": "Current round effort, chance and block ETA"},
             {"method": "GET", "path": "/api/hashrate/chart", "parameters": "hours,bucket"},
@@ -1066,6 +1167,10 @@ class EnhancedHandler(admin.AdminHandler):
             return self.send_json(api_help())
         if path == "/api/meta":
             return self.send_json(api_meta())
+        if path == "/api/pools":
+            return self.send_json(miningcore_pools_compat())
+        if path in POOL_MONITOR_COMPAT_PATHS:
+            return self.send_json(pool_monitor_compat())
         if path in ("/api/v1/summary", "/api/v1/pool"):
             return self.send_json(public_summary())
         if path == "/api/v1/health":
