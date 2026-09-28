@@ -8,22 +8,28 @@ import tempfile
 import unittest
 from pathlib import Path
 
-# The production web stack loads its configuration at import time. Supply a
-# short-lived local configuration so these tests never depend on operator files.
-_config_path = Path("config.json")
-_created_config = not _config_path.exists()
-if _created_config:
-    _config_path.write_text(json.dumps({
-        "rpc": {"url": "http://127.0.0.1:15419", "user": "test", "password": "test"},
-        "stratum": {"host": "127.0.0.1", "port": 3333},
-        "database": "test.db",
-        "pool_address": "yTestPool",
-    }))
+# The production web stack loads configuration at import time. Point it at a
+# dedicated temporary file so tests never need to read or modify production
+# config.json, which is intentionally permission-restricted on deployed hosts.
+_config_fd, _config_name = tempfile.mkstemp(prefix="yerb-pool-test-", suffix=".json")
+os.close(_config_fd)
+_config_path = Path(_config_name)
+_config_path.write_text(json.dumps({
+    "rpc": {"url": "http://127.0.0.1:15419", "user": "test", "password": "test"},
+    "stratum": {"host": "127.0.0.1", "port": 3333},
+    "database": "test.db",
+    "pool_address": "yTestPool",
+}))
+_previous_config_env = os.environ.get("YERB_POOL_CONFIG")
+os.environ["YERB_POOL_CONFIG"] = str(_config_path)
 try:
     import web_enhanced as api
 finally:
-    if _created_config:
-        _config_path.unlink()
+    if _previous_config_env is None:
+        os.environ.pop("YERB_POOL_CONFIG", None)
+    else:
+        os.environ["YERB_POOL_CONFIG"] = _previous_config_env
+    _config_path.unlink(missing_ok=True)
 
 from yerbpool.database import PoolDB
 

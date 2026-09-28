@@ -1,8 +1,9 @@
 import json
+import os
 from pathlib import Path
 from urllib.parse import urlparse
 
-DEFAULT_PATH = Path("config.json")
+DEFAULT_PATH = Path(os.environ.get("YERB_POOL_CONFIG", "config.json"))
 DEFAULT_RPC_URL = "http://127.0.0.1:15419"
 
 
