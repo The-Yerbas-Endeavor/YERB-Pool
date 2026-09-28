@@ -215,7 +215,7 @@ def api_summary():
 
     mining = _mining_snapshot()
     blocks["height"] = mining.get("height")
-    result = {"pool_address": str(base.CFG.get("pool_address", "") or ""), "pool_fee_percent": get_pool_fee_percent(base.CFG), "accounts": accounts, "shares": shares, "workers": workers, "blocks": blocks, "payouts": payouts, "network_difficulty": mining.get("network_difficulty"), "network_hashrate": mining.get("network_hashrate")}
+    result = {"height": mining.get("height"), "pool_address": str(base.CFG.get("pool_address", "") or ""), "pool_fee_percent": get_pool_fee_percent(base.CFG), "accounts": accounts, "shares": shares, "workers": workers, "blocks": blocks, "payouts": payouts, "network_difficulty": mining.get("network_difficulty"), "network_hashrate": mining.get("network_hashrate"), "network": {"height": mining.get("height"), "difficulty": mining.get("network_difficulty"), "hashrate": mining.get("network_hashrate")}}
     with _cache_lock:
         _summary_cache["value"] = result
         _summary_cache["generated_at"] = now
