@@ -28,7 +28,7 @@ SUMMARY_CACHE_SECONDS = 5
 LUCK_CACHE_SECONDS = 5
 
 _cache_lock = threading.RLock()
-_core_snapshot_cache = {"network_difficulty": None, "network_hashrate": None, "generated_at": 0}
+_core_snapshot_cache = {"height": None, "network_difficulty": None, "network_hashrate": None, "generated_at": 0}
 _wallet_balance_cache = {"balance_atomic": None, "generated_at": 0}
 _summary_cache = {"value": None, "generated_at": 0}
 _luck_cache = {"value": None, "generated_at": 0}
@@ -125,8 +125,9 @@ def _record_network_hashrate(value):
         pass
 
 
-def _snapshot_result(difficulty, network_hashrate):
+def _snapshot_result(difficulty, network_hashrate, height=None):
     result = {
+        "height": int(height) if height is not None else None,
         "network_difficulty": float(difficulty) if difficulty is not None else None,
         "network_hashrate": float(network_hashrate) if network_hashrate is not None else None,
     }
@@ -139,7 +140,7 @@ def _fetch_mining_snapshot():
     try:
         info = base.rpc_call("getmininginfo")
         if isinstance(info, dict):
-            return _snapshot_result(info.get("difficulty"), info.get("networkhashps"))
+            return _snapshot_result(info.get("difficulty"), info.get("networkhashps"), info.get("blocks"))
     except Exception:
         pass
 
@@ -151,7 +152,11 @@ def _fetch_mining_snapshot():
         network_hashrate = base.rpc_call("getnetworkhashps")
     except Exception:
         network_hashrate = None
-    return _snapshot_result(difficulty, network_hashrate)
+    try:
+        height = base.rpc_call("getblockcount")
+    except Exception:
+        height = None
+    return _snapshot_result(difficulty, network_hashrate, height)
 
 
 def _mining_snapshot():
@@ -208,7 +213,9 @@ def api_summary():
     else:
         accounts["wallet_rpc_ok"] = False
 
-    result = {"pool_address": str(base.CFG.get("pool_address", "") or ""), "pool_fee_percent": get_pool_fee_percent(base.CFG), "accounts": accounts, "shares": shares, "workers": workers, "blocks": blocks, "payouts": payouts}
+    mining = _mining_snapshot()
+    blocks["height"] = mining.get("height")
+    result = {"pool_address": str(base.CFG.get("pool_address", "") or ""), "pool_fee_percent": get_pool_fee_percent(base.CFG), "accounts": accounts, "shares": shares, "workers": workers, "blocks": blocks, "payouts": payouts, "network_difficulty": mining.get("network_difficulty"), "network_hashrate": mining.get("network_hashrate")}
     with _cache_lock:
         _summary_cache["value"] = result
         _summary_cache["generated_at"] = now
