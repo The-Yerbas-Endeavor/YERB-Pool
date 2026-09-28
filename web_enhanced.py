@@ -213,33 +213,113 @@ def pool_monitor_compat(summary=None):
     return result
 
 
-def miningcore_pools_compat(summary=None):
-    """Expose the minimum MiningCore-style pool/network shape used by autodiscovery probes."""
+def _iso_utc(ts):
+    if ts in (None, "", 0):
+        return None
+    try:
+        return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(int(ts)))
+    except (TypeError, ValueError, OverflowError):
+        return None
+
+
+def miningcore_pool_compat(summary=None):
+    """Return a permissive Miningcore-compatible pool object for aggregators."""
     compat = pool_monitor_compat(summary)
     pool = dict(compat.get("pool") or {})
     coin = dict(compat.get("coin") or {})
+    round_data = dict(compat.get("round") or {})
+    blocks = dict(compat.get("blocks") or {})
+    payouts = dict(compat.get("payouts") or {})
+
+    pool_hashrate = compat.get("pool_hashrate")
+    network_hashrate = compat.get("network_hashrate")
+    network_difficulty = compat.get("network_difficulty")
+    height = compat.get("height")
+    minimum_payment = pool.get("minimum_payout", "1.00000000")
+    try:
+        minimum_payment = float(minimum_payment)
+    except (TypeError, ValueError):
+        minimum_payment = 1.0
+
+    pool_address = pool.get("address", compat.get("pool_address", ""))
+    fee_percent = pool.get("fee_percent", compat.get("pool_fee_percent", 0))
+    connected_miners = int(compat.get("active_miners") or 0)
+    connected_workers = int(compat.get("active_workers") or 0)
+    last_pool_block_time = _iso_utc(round_data.get("started_at"))
+
     return {
-        "pools": [{
-            "id": "yerbas",
-            "coin": {
-                "name": coin.get("name", "Yerbas"),
-                "type": coin.get("symbol", "YERB"),
-                "symbol": coin.get("symbol", "YERB"),
-                "algorithm": coin.get("algorithm", "GhostRider"),
-            },
-            "poolStats": {
-                "connectedMiners": compat.get("active_miners", 0),
-                "connectedWorkers": compat.get("active_workers", 0),
-                "poolHashrate": compat.get("pool_hashrate"),
-            },
-            "networkStats": {
-                "blockHeight": compat.get("height"),
-                "networkDifficulty": compat.get("network_difficulty"),
-                "networkHashrate": compat.get("network_hashrate"),
-            },
-            "poolAddress": pool.get("address", compat.get("pool_address", "")),
-            "poolFeePercent": pool.get("fee_percent", compat.get("pool_fee_percent", 0)),
-        }]
+        "id": "yerbas",
+        "coin": {
+            "name": coin.get("name", "Yerbas"),
+            "type": coin.get("symbol", "YERB"),
+            "symbol": coin.get("symbol", "YERB"),
+            "algorithm": coin.get("algorithm", "GhostRider"),
+        },
+        "ports": {
+            "3333": {
+                "name": "GhostRider",
+            }
+        },
+        "paymentProcessing": {
+            "enabled": True,
+            "minimumPayment": minimum_payment,
+            "payoutScheme": pool.get("payout_scheme", "PROP"),
+        },
+        "poolFeePercent": fee_percent,
+        "address": pool_address,
+        "poolAddress": pool_address,
+        "poolStats": {
+            "connectedMiners": connected_miners,
+            "connectedWorkers": connected_workers,
+            # Different Miningcore generations and third-party parsers use
+            # both spellings. Publish both so a strict parser cannot drop us.
+            "poolHashRate": pool_hashrate,
+            "poolHashrate": pool_hashrate,
+        },
+        "networkStats": {
+            "networkType": coin.get("network", "mainnet"),
+            "networkHashRate": network_hashrate,
+            "networkHashrate": network_hashrate,
+            "networkDifficulty": network_difficulty,
+            "blockHeight": height,
+            "rewardType": "POW",
+        },
+        "totalBlocks": int(blocks.get("blocks") or 0),
+        "totalPaidAtomic": int(payouts.get("paid_atomic") or 0),
+        "lastPoolBlockTime": last_pool_block_time,
+        "stratum": pool.get("stratum", "stratum+tcp://pool.yerbas.org:3333"),
+    }
+
+
+def miningcore_pools_compat(summary=None):
+    """Expose the canonical Miningcore /api/pools wrapper."""
+    return {"pools": [miningcore_pool_compat(summary)]}
+
+
+def mps_flat_compat(summary=None):
+    """Small flat payload for aggregators that accept a custom API URL."""
+    compat = pool_monitor_compat(summary)
+    round_data = dict(compat.get("round") or {})
+    blocks = dict(compat.get("blocks") or {})
+    pool = dict(compat.get("pool") or {})
+    return {
+        "symbol": "YERB",
+        "algorithm": "GhostRider",
+        "hashrate": compat.get("pool_hashrate"),
+        "pool_hashrate": compat.get("pool_hashrate"),
+        "miners": int(compat.get("active_miners") or 0),
+        "workers": int(compat.get("active_workers") or 0),
+        "fee": pool.get("fee_percent", compat.get("pool_fee_percent", 0)),
+        "fee_percent": pool.get("fee_percent", compat.get("pool_fee_percent", 0)),
+        "block_height": compat.get("height"),
+        "height": compat.get("height"),
+        "network_height": compat.get("height"),
+        "network_hashrate": compat.get("network_hashrate"),
+        "network_difficulty": compat.get("network_difficulty"),
+        "blocks_found": int(blocks.get("blocks") or 0),
+        "last_block_height": round_data.get("last_pool_block_height"),
+        "last_block_found": _iso_utc(round_data.get("started_at")),
+        "stratum": pool.get("stratum", "stratum+tcp://pool.yerbas.org:3333"),
     }
 
 
@@ -278,6 +358,34 @@ def api_blocks_enhanced(status=None, limit=100, offset=0):
         block["pool_fee"] = _coin_string(block.get("pool_fee_atomic"))
         if block.get("block_hash"):
             block["explorer_url"] = f"{explorer}/block/{block['block_hash']}"
+    return result
+
+
+def miningcore_blocks_compat(limit=100, offset=0):
+    """Return pool block history using Miningcore field names."""
+    items = api_blocks_enhanced(None, limit, offset)
+    summary = pool_monitor_compat()
+    current_difficulty = summary.get("network_difficulty")
+    result = []
+    for block in items:
+        status_name = str(block.get("normalized_status") or block.get("status") or "")
+        if status_name == "mature":
+            status_name = "confirmed"
+        elif status_name in ("submitted", "confirmed", "pending"):
+            status_name = "pending"
+        elif status_name in ("orphan", "orphaned"):
+            status_name = "orphaned"
+        result.append({
+            "blockHeight": block.get("height"),
+            "networkDifficulty": current_difficulty,
+            "status": status_name or "confirmed",
+            "confirmationProgress": block.get("confirmation_progress"),
+            "transactionConfirmationData": block.get("block_hash"),
+            "reward": float(_coin_string(block.get("reward_atomic"))),
+            "infoLink": block.get("explorer_url"),
+            "miner": block.get("finder_address"),
+            "created": _iso_utc(block.get("submitted_at")),
+        })
     return result
 
 
@@ -385,7 +493,9 @@ def api_help():
             {"method": "GET", "path": "/api/summary", "description": "Complete pool, network, round and accounting summary"},
             {"method": "GET", "path": "/api/stats", "description": "Pool-monitor compatibility alias"},
             {"method": "GET", "path": "/api/status", "description": "Pool-monitor compatibility alias"},
-            {"method": "GET", "path": "/api/pools", "description": "MiningCore-style autodiscovery compatibility response"},
+            {"method": "GET", "path": "/api/pools", "description": "Miningcore-compatible pool discovery and network stats"},
+            {"method": "GET", "path": "/api/pools/yerbas/blocks", "parameters": "page,pageSize", "description": "Miningcore-compatible pool block history"},
+            {"method": "GET", "path": "/api/mps.json", "description": "Flat aggregator compatibility response"},
             {"method": "GET", "path": "/api/network", "description": "Pool-monitor compatibility alias"},
             {"method": "GET", "path": "/api/network/stats", "description": "Pool-monitor compatibility alias"},
             {"method": "GET", "path": "/api/health", "description": "Stratum, wallet, database and accounting health"},
@@ -1169,6 +1279,19 @@ class EnhancedHandler(admin.AdminHandler):
             return self.send_json(api_meta())
         if path == "/api/pools":
             return self.send_json(miningcore_pools_compat())
+        if path == "/api/pools/yerbas":
+            return self.send_json({"pool": miningcore_pool_compat()})
+        if path in ("/api/pools/yerbas/blocks", "/api/pool/yerbas/blocks"):
+            try:
+                page_size = (query.get("pageSize") or query.get("limit") or [100])[0]
+                page = max(0, int((query.get("page") or [0])[0]))
+                limit = min(max(int(page_size), 1), 500)
+                offset = page * limit
+                return self.send_json(miningcore_blocks_compat(limit, offset))
+            except (TypeError, ValueError) as exc:
+                return self.send_json({"error": str(exc)}, 400)
+        if path in ("/api/mps", "/api/mps.json"):
+            return self.send_json(mps_flat_compat())
         if path in POOL_MONITOR_COMPAT_PATHS:
             return self.send_json(pool_monitor_compat())
         if path in ("/api/v1/summary", "/api/v1/pool"):

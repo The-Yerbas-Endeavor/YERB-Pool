@@ -219,10 +219,6 @@ class PublicApiTest(unittest.TestCase):
         self.assertEqual(finder["blocks_found"][0]["height"], 1000)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
     def test_pool_monitor_compatibility_shapes(self):
         summary = {
             "height": 1128957,
@@ -230,13 +226,21 @@ if __name__ == "__main__":
             "pool_fee_percent": 0.5,
             "accounts": {"accounts": 4, "active_miners": 5},
             "workers": {"workers": 63, "active_workers": 4},
-            "blocks": {"height": 1128957},
+            "blocks": {"blocks": 2285, "height": 1128957},
+            "payouts": {"paid_atomic": 13589376835560},
             "network_difficulty": 0.001698,
             "network_hashrate": 57347.04,
             "network": {"height": 1128957, "difficulty": 0.001698, "hashrate": 57347.04},
-            "pool": {"address": "yPool", "fee_percent": 0.5, "hashrate": 3400.83},
-            "coin": {"name": "Yerbas", "symbol": "YERB", "algorithm": "GhostRider"},
-            "round": {"last_pool_block_height": 1128950},
+            "pool": {
+                "address": "yPool",
+                "fee_percent": 0.5,
+                "payout_scheme": "PROP",
+                "minimum_payout": "1.00000000",
+                "hashrate": 3400.83,
+                "stratum": "stratum+tcp://pool.yerbas.org:3333",
+            },
+            "coin": {"name": "Yerbas", "symbol": "YERB", "algorithm": "GhostRider", "network": "mainnet"},
+            "round": {"last_pool_block_height": 1128950, "started_at": 1790621529},
         }
         compat = api.pool_monitor_compat(summary)
         self.assertEqual(compat["height"], 1128957)
@@ -244,11 +248,35 @@ if __name__ == "__main__":
         self.assertEqual(compat["network_height"], 1128957)
         self.assertEqual(compat["blockHeight"], 1128957)
         self.assertEqual(compat["network"]["height"], 1128957)
-        self.assertEqual(compat["pool_hashrate"], 3400.83)
-        self.assertEqual(compat["active_miners"], 5)
-        self.assertEqual(compat["active_workers"], 4)
+
+        pool = api.miningcore_pool_compat(summary)
+        self.assertEqual(pool["networkStats"]["blockHeight"], 1128957)
+        self.assertEqual(pool["networkStats"]["networkHashRate"], 57347.04)
+        self.assertEqual(pool["networkStats"]["networkHashrate"], 57347.04)
+        self.assertEqual(pool["poolStats"]["poolHashRate"], 3400.83)
+        self.assertEqual(pool["poolStats"]["poolHashrate"], 3400.83)
+        self.assertEqual(pool["address"], "yPool")
+        self.assertEqual(pool["paymentProcessing"]["payoutScheme"], "PROP")
+        self.assertEqual(pool["coin"]["type"], "YERB")
+        self.assertIsNotNone(pool["lastPoolBlockTime"])
 
         pools = api.miningcore_pools_compat(summary)
         self.assertEqual(pools["pools"][0]["networkStats"]["blockHeight"], 1128957)
-        self.assertEqual(pools["pools"][0]["poolStats"]["poolHashrate"], 3400.83)
-        self.assertEqual(pools["pools"][0]["coin"]["symbol"], "YERB")
+
+        flat = api.mps_flat_compat(summary)
+        self.assertEqual(flat["block_height"], 1128957)
+        self.assertEqual(flat["last_block_height"], 1128950)
+
+    def test_miningcore_block_history_shape(self):
+        blocks = api.miningcore_blocks_compat(10, 0)
+        self.assertEqual(len(blocks), 1)
+        self.assertEqual(blocks[0]["blockHeight"], 1000)
+        self.assertEqual(blocks[0]["status"], "confirmed")
+        self.assertEqual(blocks[0]["transactionConfirmationData"], "ab" * 32)
+        self.assertTrue(blocks[0]["infoLink"].endswith("/block/" + "ab" * 32))
+        self.assertIsNotNone(blocks[0]["created"])
+
+
+if __name__ == "__main__":
+    unittest.main()
+

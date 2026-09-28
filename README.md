@@ -277,3 +277,13 @@ For the production baseline, both should report healthy accounting before furthe
 ## Pool-monitor compatibility
 
 Public read-only monitoring endpoints are exposed through compatibility aliases such as `/api/stats`, `/api/status`, `/api/pools`, and `/api/network`. On HTTPS-enabled installations, `scripts/install-pool-monitor-http-compat.sh` can allow only those harmless monitoring endpoints to answer directly over HTTP for external mining aggregators that do not follow HTTP-to-HTTPS redirects; all other HTTP traffic continues to redirect to HTTPS.
+
+
+### Mining pool aggregator compatibility
+
+The public pool API exposes a Miningcore-compatible discovery surface for external aggregators:
+
+- `/api/pools` — Miningcore-style `pools[]` response with both legacy and modern hashrate key spellings.
+- `/api/pools/yerbas/blocks` — Miningcore-style pool block history.
+- `/api/mps.json` — small flat fallback response with pool/network hashrate, current network height, miners, workers and last pool block.
+- The HTTP compatibility installer permits these read-only routes without disabling HTTPS redirection for the normal website.

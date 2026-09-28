@@ -302,7 +302,7 @@ server {
 
     # Keep the public, read-only pool-monitor API reachable without a redirect.
     # Some mining aggregators probe HTTP endpoints but do not follow 301s.
-    location ~ ^/api/(?:summary|stats|status|pool_stats|poolstats|pools|luck|health|blocks|network(?:/stats)?|pool/stats)$ {
+    location ~ ^/api/(?:summary|stats|status|pool_stats|poolstats|luck|health|blocks|network(?:/stats)?|pool/stats|mps(?:\.json)?|pools(?:/yerbas(?:/blocks)?)?|pool/yerbas/blocks)$ {
         proxy_pass http://127.0.0.1:8080;
         proxy_http_version 1.1;
         proxy_set_header Host \$host;
