@@ -268,7 +268,11 @@ class PublicApiTest(unittest.TestCase):
         self.assertEqual(flat["last_block_height"], 1128950)
 
     def test_miningcore_block_history_shape(self):
-        blocks = api.miningcore_blocks_compat(10, 0)
+        summary = {
+            "network_difficulty": 0.001698,
+            "network": {"difficulty": 0.001698},
+        }
+        blocks = api.miningcore_blocks_compat(10, 0, summary)
         self.assertEqual(len(blocks), 1)
         self.assertEqual(blocks[0]["blockHeight"], 1000)
         self.assertEqual(blocks[0]["status"], "confirmed")

@@ -361,11 +361,11 @@ def api_blocks_enhanced(status=None, limit=100, offset=0):
     return result
 
 
-def miningcore_blocks_compat(limit=100, offset=0):
+def miningcore_blocks_compat(limit=100, offset=0, summary=None):
     """Return pool block history using Miningcore field names."""
     items = api_blocks_enhanced(None, limit, offset)
-    summary = pool_monitor_compat()
-    current_difficulty = summary.get("network_difficulty")
+    compat = pool_monitor_compat(summary)
+    current_difficulty = compat.get("network_difficulty")
     result = []
     for block in items:
         status_name = str(block.get("normalized_status") or block.get("status") or "")
