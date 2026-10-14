@@ -6,6 +6,7 @@ accepted-share difficulty estimator. Historical graphs use pre-aggregated
 60-second buckets so dashboard chart requests never scan the full shares table.
 """
 import contextlib
+import logging
 import mimetypes
 import sqlite3
 import threading
@@ -32,6 +33,8 @@ _core_snapshot_cache = {"height": None, "network_difficulty": None, "network_has
 _wallet_balance_cache = {"balance_atomic": None, "generated_at": 0}
 _summary_cache = {"value": None, "generated_at": 0}
 _luck_cache = {"value": None, "generated_at": 0}
+_summary_refresh_lock = threading.Lock()
+_luck_refresh_lock = threading.Lock()
 
 
 @contextlib.contextmanager
@@ -182,13 +185,8 @@ def _network_sampler_loop():
         time.sleep(CORE_SNAPSHOT_INTERVAL)
 
 
-def api_summary():
+def _build_summary():
     now = int(time.time())
-    with _cache_lock:
-        cached = _summary_cache.get("value")
-        cached_at = int(_summary_cache.get("generated_at") or 0)
-        if cached is not None and now - cached_at < SUMMARY_CACHE_SECONDS:
-            return cached
     cutoff = now - ACTIVE_WINDOW
     active_miner_cutoff = now - 3600
     with base.db() as con:
@@ -196,8 +194,10 @@ def api_summary():
         active_miners = base.one(con, """SELECT COUNT(DISTINCT a.id) active_miners
                FROM accounts a JOIN workers w ON w.account_id=a.id
                WHERE a.enabled=1 AND w.last_seen_at>=?""", (active_miner_cutoff,))
-        shares = base.one(con, "SELECT COUNT(*) shares, COALESCE(SUM(CASE WHEN accepted=1 THEN 1 ELSE 0 END),0) accepted, COALESCE(SUM(CASE WHEN accepted=0 THEN 1 ELSE 0 END),0) rejected FROM shares")
-        workers = base.one(con, """SELECT (SELECT COUNT(*) FROM workers) workers, COUNT(DISTINCT s.worker_id) active_workers FROM shares s WHERE s.accepted=1 AND s.worker_id IS NOT NULL AND s.ts>=?""", (cutoff,))
+        shares = base.one(con, """SELECT (SELECT COUNT(*) FROM shares) shares,
+                      (SELECT COUNT(*) FROM shares WHERE accepted=1) accepted,
+                      (SELECT COUNT(*) FROM shares WHERE accepted=0) rejected""")
+        workers = base.one(con, """SELECT (SELECT COUNT(*) FROM workers) workers, COUNT(DISTINCT s.worker_id) active_workers FROM shares s INDEXED BY idx_shares_ts_accepted_diff WHERE s.accepted=1 AND s.worker_id IS NOT NULL AND s.ts>=?""", (cutoff,))
         blocks = base.one(con, "SELECT COUNT(*) blocks, COALESCE(SUM(CASE WHEN status='mature' THEN 1 ELSE 0 END),0) mature, COALESCE(SUM(CASE WHEN status IN ('submitted','confirmed') THEN 1 ELSE 0 END),0) pending FROM blocks")
         payouts = base.one(con, "SELECT COUNT(*) payouts, COALESCE(SUM(CASE WHEN status='sent' THEN total_atomic ELSE 0 END),0) paid_atomic FROM payouts")
 
@@ -216,10 +216,52 @@ def api_summary():
     mining = _mining_snapshot()
     blocks["height"] = mining.get("height")
     result = {"height": mining.get("height"), "pool_address": str(base.CFG.get("pool_address", "") or ""), "pool_fee_percent": get_pool_fee_percent(base.CFG), "accounts": accounts, "shares": shares, "workers": workers, "blocks": blocks, "payouts": payouts, "network_difficulty": mining.get("network_difficulty"), "network_hashrate": mining.get("network_hashrate"), "network": {"height": mining.get("height"), "difficulty": mining.get("network_difficulty"), "hashrate": mining.get("network_hashrate")}}
-    with _cache_lock:
-        _summary_cache["value"] = result
-        _summary_cache["generated_at"] = now
     return result
+
+
+def _cached_stat(cache, refresh_lock, ttl, build):
+    """Serve the last completed snapshot while one thread refreshes it."""
+    db_path = base.DB_PATH
+    with _cache_lock:
+        value = cache.get("value") if cache.get("db_path") == db_path else None
+        fresh = time.monotonic() - cache.get("completed_at", 0) < ttl
+    if value is not None and fresh:
+        return value
+
+    def refresh():
+        try:
+            result = build()
+            with _cache_lock:
+                cache.update(value=result, db_path=db_path, completed_at=time.monotonic())
+            return result
+        except Exception:
+            # Keep the previous completed snapshot available on refresh failure.
+            logging.getLogger(__name__).exception("Could not refresh public statistics")
+            return value
+        finally:
+            refresh_lock.release()
+
+    if value is not None:
+        if refresh_lock.acquire(blocking=False):
+            threading.Thread(target=refresh, name="public-stats-refresh", daemon=True).start()
+        return value
+    # Cold requests share one calculation rather than scan concurrently.
+    with refresh_lock:
+        with _cache_lock:
+            if cache.get("db_path") == db_path and cache.get("value") is not None:
+                return cache["value"]
+        result = build()
+        with _cache_lock:
+            cache.update(value=result, db_path=db_path, completed_at=time.monotonic())
+        return result
+
+
+def api_summary():
+    return _cached_stat(_summary_cache, _summary_refresh_lock, SUMMARY_CACHE_SECONDS, _build_summary)
+
+
+def api_luck():
+    return _cached_stat(_luck_cache, _luck_refresh_lock, LUCK_CACHE_SECONDS, _build_luck)
 
 
 def api_workers(limit=500):
@@ -227,11 +269,21 @@ def api_workers(limit=500):
     cutoff = now - HASHRATE_WINDOW
     limit = min(max(int(limit), 1), 1000)
     with base.db() as con:
-        result = base.rows(con, """SELECT w.id,a.address,w.name,w.created_at,w.last_seen_at,w.accepted_shares,w.rejected_shares,
-                      COALESCE(SUM(CASE WHEN s.accepted=1 AND s.ts>=? THEN s.difficulty ELSE 0 END),0) recent_diff,
-                      COALESCE(MAX(CASE WHEN s.accepted=1 THEN s.ts ELSE NULL END),0) last_share_at
-               FROM workers w JOIN accounts a ON a.id=w.account_id LEFT JOIN shares s ON s.worker_id=w.id
-               GROUP BY w.id ORDER BY MAX(w.last_seen_at, COALESCE(MAX(s.ts),0)) DESC LIMIT ?""", (cutoff, limit))
+        result = base.rows(con, """WITH recent AS (
+                   SELECT worker_id, SUM(difficulty) recent_diff
+                   FROM shares INDEXED BY idx_shares_ts_accepted_diff WHERE ts>=? AND accepted=1
+                   GROUP BY worker_id
+               )
+               SELECT w.id,a.address,w.name,w.created_at,w.last_seen_at,
+                      w.accepted_shares,w.rejected_shares,
+                      COALESCE(r.recent_diff,0) recent_diff,
+                      COALESCE((SELECT s.ts FROM shares s
+                                WHERE s.worker_id=w.id AND s.accepted=1
+                                ORDER BY s.ts DESC LIMIT 1),0) last_share_at
+               FROM workers w JOIN accounts a ON a.id=w.account_id
+               LEFT JOIN recent r ON r.worker_id=w.id
+               ORDER BY MAX(w.last_seen_at,COALESCE((SELECT s.ts FROM shares s
+                   WHERE s.worker_id=w.id ORDER BY s.ts DESC LIMIT 1),0)) DESC,w.id DESC LIMIT ?""", (cutoff, limit))
     for item in result:
         item["hashrate"] = _hashrate_from_diff(item.get("recent_diff"))
         last_activity = max(int(item.get("last_seen_at") or 0), int(item.get("last_share_at") or 0))
@@ -344,7 +396,7 @@ def api_pool_blocks(hours=24):
 def _recent_pool_hashrate():
     cutoff = int(time.time()) - HASHRATE_WINDOW
     with base.db() as con:
-        recent = base.one(con, "SELECT COALESCE(SUM(difficulty),0) accepted_diff FROM shares WHERE accepted=1 AND ts>=?", (cutoff,))
+        recent = base.one(con, "SELECT COALESCE(SUM(difficulty),0) accepted_diff FROM shares INDEXED BY idx_shares_ts_accepted_diff WHERE accepted=1 AND ts>=?", (cutoff,))
     return _hashrate_from_diff(recent.get("accepted_diff"))
 
 
@@ -366,22 +418,29 @@ def api_hashrate_chart(hours=24, bucket_seconds=600):
     }
 
 
-def api_luck():
+def _build_luck():
     now = int(time.time())
-    with _cache_lock:
-        cached = _luck_cache.get("value")
-        cached_at = int(_luck_cache.get("generated_at") or 0)
-        if cached is not None and now - cached_at < LUCK_CACHE_SECONDS:
-            return cached
     pool_hashrate = _recent_pool_hashrate()
     with base.db() as con:
         last_block = base.one(con, "SELECT height,submitted_at FROM blocks ORDER BY id DESC LIMIT 1")
         if last_block and last_block.get("submitted_at"):
             round_start = int(last_block["submitted_at"])
         else:
-            first = base.one(con, "SELECT MIN(ts) first_ts FROM shares WHERE accepted=1")
+            first = base.one(con, "SELECT ts first_ts FROM shares INDEXED BY idx_shares_ts_accepted_diff WHERE accepted=1 ORDER BY ts LIMIT 1")
             round_start = int(first.get("first_ts") or now)
-        round_stats = base.one(con, "SELECT COUNT(*) accepted_shares, COALESCE(SUM(difficulty),0) accepted_diff FROM shares WHERE accepted=1 AND ts>?", (round_start,))
+        next_bucket = (round_start // 60 + 1) * 60
+        has_buckets = con.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='share_buckets_60s'").fetchone()
+        if has_buckets:
+            partial = base.one(con, """SELECT COUNT(*) accepted_shares,
+                       COALESCE(SUM(difficulty),0) accepted_diff FROM shares INDEXED BY idx_shares_ts_accepted_diff
+                       WHERE ts>? AND ts<? AND accepted=1""", (round_start, next_bucket))
+            complete = base.one(con, """SELECT COALESCE(SUM(accepted),0) accepted_shares,
+                        COALESCE(SUM(accepted_diff),0) accepted_diff
+                        FROM share_buckets_60s WHERE bucket>=?""", (next_bucket,))
+            round_stats = {key: partial[key] + complete[key]
+                           for key in ("accepted_shares", "accepted_diff")}
+        else:
+            round_stats = base.one(con, "SELECT COUNT(*) accepted_shares, COALESCE(SUM(difficulty),0) accepted_diff FROM shares INDEXED BY idx_shares_ts_accepted_diff WHERE accepted=1 AND ts>?", (round_start,))
     mining = _mining_snapshot()
     network_diff = mining.get("network_difficulty")
     network_hashrate = mining.get("network_hashrate")
@@ -400,9 +459,6 @@ def api_luck():
         "round_seconds": max(0, now - round_start), "round_accepted_shares": int(round_stats.get("accepted_shares") or 0),
         "round_stratum_difficulty": round_diff, "round_effort_percent": effort_ratio * 100.0,
         "chance_percent": chance, "last_block_height": last_block.get("height") if last_block else None}
-    with _cache_lock:
-        _luck_cache["value"] = result
-        _luck_cache["generated_at"] = now
     return result
 
 

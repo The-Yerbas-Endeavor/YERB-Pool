@@ -188,8 +188,8 @@
     ensureStyle();if(!ensureStrip()) return;
     const p=state.pool||{},h=state.health||{};
     const stratum=h.stratum||{},wallet=h.wallet||{},accounting=h.accounting||{};
-    setHealth('status-stratum',stratum.online?'Stratum Online':'Stratum Offline',!!stratum.online,false);
-    setHealth('status-wallet',wallet.online?'Wallet Online':'Wallet Offline',!!wallet.online,false);
+    setHealth('status-stratum',!state.health?'Checking Stratum…':stratum.online?'Stratum Online':'Stratum Offline',!!stratum.online,false);
+    setHealth('status-wallet',!state.health?'Checking Wallet…':wallet.online?'Wallet Online':'Wallet Offline',!!wallet.online,false);
     if(accounting.ok===true)setHealth('status-accounting','Accounting OK',true,false);else if(accounting.ok===false)setHealth('status-accounting','Accounting Check',false,true);else setHealth('status-accounting','Accounting —',false,true);
     const workers=document.getElementById('status-workers');if(workers) workers.textContent=Number(p.active_workers||0).toLocaleString();
     const fee=document.getElementById('status-fee');if(fee) fee.textContent=Number(p.pool_fee_percent||0).toFixed(2)+'%';
@@ -201,20 +201,22 @@
   async function refresh(){
     if(refreshBusy) return;refreshBusy=true;
     try{
-      const [poolResult,healthResult,summaryResult,minersResult]=await Promise.allSettled([
-        fetch('/api/pool',{cache:'no-store'}).then(r=>r.ok?r.json():Promise.reject(new Error('pool status unavailable'))),
-        fetch('/api/health',{cache:'no-store'}).then(r=>r.ok?r.json():Promise.reject(new Error('health unavailable'))),
-        fetch('/api/summary',{cache:'no-store'}).then(r=>r.ok?r.json():Promise.reject(new Error('summary unavailable'))),
-        fetch('/api/miners?limit=1000',{cache:'no-store'}).then(r=>r.ok?r.json():Promise.reject(new Error('miners unavailable')))
-      ]);
-      if(poolResult.status==='fulfilled') state.pool=poolResult.value;
-      if(healthResult.status==='fulfilled') state.health=healthResult.value;
-      if(summaryResult.status==='fulfilled') state.summary=summaryResult.value;
-      if(minersResult.status==='fulfilled'){
-        const miners=minersResult.value;
-        state.activeMiners=Array.isArray(miners)?miners.length:(Array.isArray(miners?.items)?miners.items.length:null);
+      async function load(url,apply){
+        const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),30000);
+        try{
+          const response=await fetch(url,{cache:'no-store',signal:controller.signal});
+          if(!response.ok)return;
+          apply(await response.json());render();
+        }finally{clearTimeout(timer)}
       }
-      render();
+      await Promise.allSettled([
+        load('/api/pool',data=>{state.pool=data}),
+        load('/api/health',data=>{state.health=data}),
+        load('/api/summary',data=>{state.summary=data}),
+        load('/api/miners?limit=1000',miners=>{
+          state.activeMiners=Array.isArray(miners)?miners.length:(Array.isArray(miners?.items)?miners.items.length:null);
+        })
+      ]);
     }finally{refreshBusy=false}
   }
 

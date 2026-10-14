@@ -34,14 +34,26 @@ class PreloadedControlHandler(controls.ControlHandler):
         text = text.replace(
             "let selectedHashRange='24H';",
             "let selectedHashRange='24H';\n"
-            "let dashboardHashContext={poolBalanceAtomic:0,immatureAtomic:0,totalPaidAtomic:0,activeMiners:0,etaSeconds:null,lastBlockAt:0,lastBlockHeight:null};",
+            "let dashboardHashContext={poolBalanceAtomic:null,immatureAtomic:null,totalPaidAtomic:null,activeMiners:null,etaSeconds:null,lastBlockAt:0,lastBlockHeight:null,blocksLoaded:false};",
             1,
         )
         text = text.replace(
-            "const current=w.reduce((n,x)=>n+Number(x.active?x.hashrate:0),0),poolNow=Number(hash?.pool_hashrate||luck?.pool_hashrate||current);const cards=",
-            "const current=w.reduce((n,x)=>n+Number(x.active?x.hashrate:0),0),poolNow=Number(hash?.pool_hashrate||luck?.pool_hashrate||current);"
-            "dashboardHashContext={poolBalanceAtomic:Number(s.accounts.balance_atomic||0),immatureAtomic:Number(s.accounts.immature_atomic||0),totalPaidAtomic:Number(s.payouts.paid_atomic||0),activeMiners:Number(s.accounts.active_miners||0),etaSeconds:luck?.eta_seconds??null,lastBlockAt:Number(b?.[0]?.submitted_at||0),lastBlockHeight:b?.[0]?.height??null};"
-            "const cards=",
+            "function updateDashboardContext(s,b,luck){}",
+            r"""function updateDashboardContext(s,b,luck){
+              if(s)Object.assign(dashboardHashContext,{poolBalanceAtomic:Number(s.accounts.balance_atomic||0),immatureAtomic:Number(s.accounts.immature_atomic||0),totalPaidAtomic:Number(s.payouts.paid_atomic||0),activeMiners:Number(s.accounts.active_miners||0)});
+              if(luck)dashboardHashContext.etaSeconds=luck.eta_seconds??null;
+              if(b!==null)Object.assign(dashboardHashContext,{blocksLoaded:true,lastBlockAt:Number(b?.[0]?.submitted_at||0),lastBlockHeight:b?.[0]?.height??null});
+              for(const metric of document.querySelectorAll('#combined-hash-card .hash-metric')){
+                const label=metric.querySelector('span')?.textContent?.trim(),value=metric.querySelector('strong'),detail=metric.querySelector('small');
+                if(!value)continue;
+                if(s&&label==='Pool balance / Immature / Total paid')value.textContent=[dashboardHashContext.poolBalanceAtomic,dashboardHashContext.immatureAtomic,dashboardHashContext.totalPaidAtomic].map(coin).join(" / ");
+                if(s&&label==='Active miners')value.textContent=dashboardHashContext.activeMiners.toLocaleString();
+                if(label==='Block ETA / Last found'){
+                  value.textContent=fmtTime(dashboardHashContext.etaSeconds)+' / '+(dashboardHashContext.blocksLoaded?(dashboardHashContext.lastBlockAt?ago(dashboardHashContext.lastBlockAt):'never'):'Loading…');
+                  if(detail)detail.textContent=dashboardHashContext.blocksLoaded?(dashboardHashContext.lastBlockHeight!=null?'latest pool block #'+dashboardHashContext.lastBlockHeight.toLocaleString():'no pool block found'):'Loading…';
+                }
+              }
+            }""",
             1,
         )
 
@@ -170,11 +182,11 @@ class PreloadedControlHandler(controls.ControlHandler):
         )
         balance_metric = (
             '<div class="hash-metric"><span>Pool balance / Immature / Total paid</span>'
-            '<strong>${coin(dashboardHashContext.poolBalanceAtomic)} / ${coin(dashboardHashContext.immatureAtomic)} / ${coin(dashboardHashContext.totalPaidAtomic)}</strong></div>'
+            '<strong>${dashboardHashContext.poolBalanceAtomic==null?"Loading…":[dashboardHashContext.poolBalanceAtomic,dashboardHashContext.immatureAtomic,dashboardHashContext.totalPaidAtomic].map(coin).join(" / ")}</strong></div>'
         )
         active_miners_metric = (
             '<div class="hash-metric"><span>Active miners</span>'
-            '<strong>${Number(dashboardHashContext.activeMiners||0).toLocaleString()}</strong>'
+            '<strong>${dashboardHashContext.activeMiners==null?"Loading…":Number(dashboardHashContext.activeMiners).toLocaleString()}</strong>'
             '<small>active within the last hour</small></div>'
         )
         new_metrics = (

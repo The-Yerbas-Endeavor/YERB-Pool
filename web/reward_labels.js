@@ -109,11 +109,12 @@
     if(!main) return;
 
     const commands=[
-      {name:'cpuminer-opt-gr',type:'CPU',command:'cpuminer-opt-gr -a gr -o stratum+tcp://pool.yerbas.org:3333 -u YOUR_YERB_ADDRESS.cpu -p x'},
-      {name:'SRBMiner-MULTI',type:'CPU / GPU',command:'SRBMiner-MULTI --algorithm ghostrider --pool pool.yerbas.org:3333 --wallet YOUR_YERB_ADDRESS.srb --password x'},
-      {name:'BzMiner',type:'GPU',command:'bzminer -a ghostrider -w YOUR_YERB_ADDRESS.bz -p stratum+tcp://pool.yerbas.org:3333'},
-      {name:'WildRig Multi',type:'GPU',command:'wildrig.exe --algo ghostrider --url stratum+tcp://pool.yerbas.org:3333 --user YOUR_YERB_ADDRESS.wildrig --pass x'},
-      {name:'cpuminer-gr-avx2',type:'CPU',command:'cpuminer-gr-avx2 -a gr -o stratum+tcp://pool.yerbas.org:3333 -u YOUR_YERB_ADDRESS.avx2 -p x'}
+      {name:'Yerbas Miner',url:'https://github.com/The-Yerbas-Endeavor/Yerbas-Miner/releases/latest',downloadLabel:'Download',type:'CPU / NVIDIA CUDA',command:'yerbas-miner --pool stratum+tcp://pool.yerbas.org:3333 --user YOUR_YERB_ADDRESS --worker yerbas --password x'},
+      {name:'cpuminer-opt-gr',url:'https://github.com/josajosjos/cpuminer-opt-gr/archive/refs/heads/master.zip',downloadLabel:'Download source',type:'CPU',command:'cpuminer-opt-gr -a gr -o stratum+tcp://pool.yerbas.org:3333 -u YOUR_YERB_ADDRESS.cpu -p x'},
+      {name:'SRBMiner-MULTI',url:'https://github.com/doktor83/SRBMiner-Multi/releases/latest',downloadLabel:'Download',type:'CPU / GPU',command:'SRBMiner-MULTI --algorithm ghostrider --pool pool.yerbas.org:3333 --wallet YOUR_YERB_ADDRESS.srb --password x'},
+      {name:'BzMiner',url:'https://github.com/bzminer/bzminer/releases/latest',downloadLabel:'Download',type:'GPU',command:'bzminer -a ghostrider -w YOUR_YERB_ADDRESS.bz -p stratum+tcp://pool.yerbas.org:3333'},
+      {name:'WildRig Multi',url:'https://github.com/andru-kun/wildrig-multi/releases/latest',downloadLabel:'Download',type:'GPU',command:'wildrig.exe --algo ghostrider --url stratum+tcp://pool.yerbas.org:3333 --user YOUR_YERB_ADDRESS.wildrig --pass x'},
+      {name:'cpuminer-gr-avx2',url:'https://github.com/WyvernTKC-GR/cpu-miner-gr-avx2/archive/refs/heads/main.zip',downloadLabel:'Download source',type:'CPU',command:'cpuminer-gr-avx2 -a gr -o stratum+tcp://pool.yerbas.org:3333 -u YOUR_YERB_ADDRESS.avx2 -p x'}
     ];
 
     const section=document.createElement('section');
@@ -126,7 +127,7 @@
           style="width:100%;box-sizing:border-box;font-family:monospace;padding:11px 12px;border-radius:7px;border:1px solid rgba(100,255,140,.35);background:#0b120d;color:inherit" />
         <div id="miner-address-message" class="small muted" style="margin-top:7px">Commands will update as you type.</div>
       </div>
-      <div style="display:grid;gap:10px;margin-top:10px">${commands.map((m,i)=>`<div class="card" style="padding:14px"><div style="display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:8px;flex-wrap:wrap"><div><strong>${esc(m.name)}</strong> <span class="small muted">${esc(m.type)}</span></div><button type="button" class="miner-copy-btn" data-command-index="${i}" style="cursor:pointer">Copy</button></div><input class="miner-command-input" data-command-index="${i}" data-template="${esc(m.command)}" type="text" readonly value="${esc(m.command)}" style="width:100%;box-sizing:border-box;font-family:monospace;padding:10px 12px;border-radius:7px;border:1px solid rgba(100,255,140,.25);background:#0b120d;color:inherit" /></div>`).join('')}</div>`;
+      <div style="display:grid;gap:10px;margin-top:10px">${commands.map((m,i)=>`<div class="card" style="padding:14px"><div style="display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:8px;flex-wrap:wrap"><div><strong>${esc(m.name)}</strong> <span class="small muted">${esc(m.type)}</span></div><div style="display:flex;align-items:center;gap:12px"><a href="${esc(m.url)}" target="_blank" rel="noopener noreferrer" aria-label="${esc(m.downloadLabel)} ${esc(m.name)}">${esc(m.downloadLabel)} ↗</a><button type="button" class="miner-copy-btn" data-command-index="${i}" style="cursor:pointer">Copy</button></div></div><input class="miner-command-input" data-command-index="${i}" data-template="${esc(m.command)}" type="text" readonly value="${esc(m.command)}" style="width:100%;box-sizing:border-box;font-family:monospace;padding:10px 12px;border-radius:7px;border:1px solid rgba(100,255,140,.25);background:#0b120d;color:inherit" /></div>`).join('')}</div>`;
 
     const connectHeading=[...main.querySelectorAll('h1,h2,h3')].find(h=>h.textContent.toLowerCase().includes('connect to yerb pool'));
     const connectSection=connectHeading?.closest('section');
