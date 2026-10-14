@@ -1,54 +1,27 @@
 # YERB Pool
 
-A standalone Yerbas (YERB) GhostRider mining pool with Stratum, proportional block accounting, automated batched payouts, an admin treasury, and a live web dashboard.
+A standalone [Yerbas](https://github.com/The-Yerbas-Endeavor) (YERB) mining pool for the GhostRider algorithm. Includes Stratum, proportional rewards, automated payouts, and a web dashboard with miner, worker, block, and payout history.
 
-## Production baseline
+**[Live dashboard](https://pool.yerbas.org/)** · **[Mining setup and downloads](https://pool.yerbas.org/configure)** · **[API documentation](https://pool.yerbas.org/api/help)**
 
-`main` is intended to remain a deployable working baseline. Changes should preserve the existing mining, payout, accounting, admin, and diagnostics paths unless a change explicitly targets one of them.
+## Connect a miner
 
-Current production features include:
+Pool address: `stratum+tcp://pool.yerbas.org:3333`
 
-- Yerbas `getblocktemplate` polling and block submission
-- Standard Stratum TCP on port `3333`
-- `mining.subscribe`, `mining.authorize`, `mining.notify`, and `mining.submit`
-- Native GhostRider share verification built from a pinned Yerbas Core revision
-- Variable difficulty with a 12-second target share time
-- SQLite miner, worker, share, block, ledger, and payout accounting
-- Proportional round rewards
-- Coinbase maturity tracking
-- Adjustable pool fee
-- Internal pool treasury address and admin withdrawal controls
-- Combined `sendmany` miner payout batches every 2 hours
-- 60-second block maturity checks
-- Public miner/account pages and address search
-- Pool, worker, block, payout, and accounting APIs
-- Read-only health and accounting-integrity diagnostics
-- Web/admin dashboard served through `web_enhanced.py`
+Use your YERB payout address as the username, with an optional `.worker` suffix. Password: `x`.
 
-## Architecture
+With [Yerbas Miner](https://github.com/The-Yerbas-Endeavor/Yerbas-Miner/releases/latest):
 
-```text
-GhostRider miner
-      |
-Stratum :3333
-      |
-   pool.py
-      |
-+-----+--------------------+
-|                          |
-SQLite                 Yerbas RPC
-|                          |
-Accounting             yerbasd
-Payouts
-Treasury
-
-Web stack:
-web.py -> web_stats.py -> web_admin.py -> web_enhanced.py
+```bash
+yerbas-miner --pool stratum+tcp://pool.yerbas.org:3333 \
+  --user YOUR_YERB_ADDRESS --worker yerbas --password x
 ```
 
-The layered web stack is intentional in the current production baseline. Do not remove one of these files without first consolidating and testing the behavior inherited from it.
+The dashboard and Configure page provide commands and download links for supported miners.
 
-## Ubuntu installation
+## Install on Ubuntu
+
+Requires sudo access and a host that can accept mining connections on TCP port `3333`.
 
 ```bash
 sudo apt update
@@ -59,211 +32,43 @@ cd YERB-Pool
 bash install.sh
 ```
 
-The installer builds the native GhostRider verifier, installs the pool under `/opt/yerb-pool`, initializes/upgrades the database, installs the systemd units, preserves an existing Nginx configuration, and restarts the pool services.
+The installer backs up an existing installation, sets up Yerbas Core and local RPC, builds the native GhostRider verifier, and installs the pool under `/opt/yerb-pool`. It also installs systemd services and applies host security settings, including firewall rules.
 
-## Configuration
+## Configuration and payouts
 
-Start from `config.example.json` for a manual installation. Production installs keep their live configuration at:
+See [config.example.json](config.example.json) for available settings. The installed configuration is `/opt/yerb-pool/config.json`; keep RPC credentials private.
 
-```text
-/opt/yerb-pool/config.json
-```
+Payout defaults are a **1 YERB minimum**, a **2-hour payout interval**, and **100 confirmations** before rewards mature. Block maturity is checked every 60 seconds. Eligible miners are paid together in a wallet transaction. Pool fees are adjustable through the admin settings and credited to the pool treasury.
 
-Important defaults:
+## Service management
 
-```json
-{
-  "stratum": {
-    "host": "0.0.0.0",
-    "port": 3333,
-    "difficulty": 0.05,
-    "vardiff": {
-      "enabled": true,
-      "min_difficulty": 0.05,
-      "max_difficulty": 65536.0,
-      "target_share_seconds": 12,
-      "retarget_seconds": 60
-    }
-  },
-  "payouts": {
-    "enabled": true,
-    "coinbase_maturity": 100,
-    "block_check_interval_seconds": 60,
-    "check_interval_seconds": 7200,
-    "minimum_payout": "1.00000000",
-    "pool_fee_percent": 0.0
-  }
-}
-```
-
-The adjustable pool fee is persisted by the pool's runtime settings. Future pool-fee allocations are credited to the internally managed treasury address.
-
-## Services
+- Mining service: `yerb-pool` → `pool.py`
+- Web/admin service: `yerb-pool-web` → `web_preloaded.py`
 
 ```bash
-systemctl status yerb-pool --no-pager
-systemctl status yerb-pool-web --no-pager
-```
-
-Production entrypoints:
-
-```text
-Mining/Stratum: /opt/yerb-pool/pool.py
-Web/Admin:      /opt/yerb-pool/web_enhanced.py
-```
-
-Useful logs:
-
-```bash
+systemctl status yerb-pool yerb-pool-web --no-pager
 journalctl -u yerb-pool -n 50 --no-pager
 journalctl -u yerb-pool-web -n 50 --no-pager
 ```
 
-## Miner connection
-
-```text
-stratum+tcp://pool.yerbas.org:3333
-```
-
-Username format:
-
-```text
-YOUR_YERB_ADDRESS.worker
-```
-
-Example:
+After changing web code, restart the web service:
 
 ```bash
-cpuminer-opt-gr -a gr \
-  -o stratum+tcp://pool.yerbas.org:3333 \
-  -u YOUR_YERB_ADDRESS.cpu \
-  -p x
+sudo systemctl restart yerb-pool-web
 ```
 
-The dashboard provides prebuilt commands for supported miners.
+## Health and accounting
 
-## Payouts
+Public monitoring endpoints:
 
-The payout manager deliberately separates block maintenance from miner payments:
+- `/api/summary` — pool statistics
+- `/api/health` — Stratum, wallet, database, and accounting health
+- `/api/accounting-integrity` — accounting reconciliation
+- `/api/pools` — Miningcore-compatible pool discovery
 
-- block confirmation/maturity checks: every 60 seconds
-- eligible payout checks: every 7200 seconds (2 hours)
-- eligible miners in each payout cycle are combined into one wallet `sendmany` transaction
-- restarting the service does not intentionally trigger an immediate scheduled payout
+See [API documentation](https://pool.yerbas.org/api/help) for versioned, paginated endpoints and miner/worker history.
 
-The configured minimum payout remains enforced before an account is included in a batch.
-
-## Pool treasury
-
-The pool wallet creates and owns a dedicated treasury address. Pool fees are credited to that account through normal immature/mature accounting. The admin panel can display the treasury balance and broadcast authenticated withdrawals without storing the private key in the web application.
-
-## Diagnostics
-
-Public/read-only diagnostics:
-
-```text
-/api/summary
-/api/pool
-/api/health
-/api/accounting-integrity
-```
-
-Public API discovery and versioned endpoints:
-
-```text
-/api
-/api/help
-/api/meta
-/api/v1/summary
-/api/v1/health
-/api/v1/blocks?limit=100&offset=0
-/api/v1/payouts?limit=100&offset=0
-/api/v1/miners?limit=100&offset=0
-/api/v1/workers?limit=100&offset=0
-/api/v1/shares?status=accepted&limit=100&offset=0
-```
-
-The legacy list endpoints continue returning bare arrays for dashboard
-compatibility. The `/api/v1` list endpoints return `items`, `pagination`, and
-`generated_at`. Exact coin values are retained as atomic integers and are also
-provided as eight-decimal strings where applicable.
-
-Miner-specific API routes:
-
-```text
-/api/account/{address}/summary
-/api/account/{address}/payments
-/api/account/{address}/earnings/daily?days=30
-/api/account/{address}/balance-changes
-/api/account/{address}/blocks
-/api/account/{address}/performance?hours=24&bucket=600
-/api/worker/{id}/performance?hours=24&bucket=600
-/api/worker/{id}/detail?hours=24&bucket=600&share_limit=25
-/api/payouts/{id}
-```
-
-Worker detail responses combine identity and live hashrate data with range
-averages, recent shares, rejection reasons, and blocks attributed to that
-worker. The public worker page renders these diagnostics around the existing
-performance chart.
-
-The public Payouts page uses server-side pagination and can browse the complete
-payout history. Individual payout-detail responses include the complete
-recipient list for that batch.
-
-Local accounting reconciliation:
-
-```bash
-cd /opt/yerb-pool
-sudo -u yerbpool python3 scripts/check-accounting.py
-```
-
-A healthy result reports:
-
-```json
-{
-  "ok": true,
-  "difference": {
-    "mature_atomic": 0,
-    "immature_atomic": 0,
-    "earned_atomic": 0,
-    "paid_atomic": 0
-  }
-}
-```
-
-Do not manually alter miner balances to repair a failed integrity check. Diagnose the ledger/accounting discrepancy first.
-
-## Native GhostRider verifier
-
-Build manually with:
-
-```bash
-./scripts/build-native.sh
-```
-
-The native verifier is compiled directly from a pinned Yerbas Core revision. The pool refuses to start when the verifier is unavailable and never credits unverified shares.
-
-## Repository hygiene
-
-Runtime databases, live configuration, Python caches, native build products, logs, crash dumps, editor metadata, and temporary files are intentionally excluded by `.gitignore`.
-
-Keep `main` focused on source, tests, production configuration examples, installer/service definitions, and documentation. Experimental rewrites should be developed on a separate branch and merged only after the production health and accounting checks pass.
-
-## Baseline verification before and after changes
-
-```bash
-python3 -m py_compile \
-  pool.py \
-  web.py \
-  web_stats.py \
-  web_admin.py \
-  web_enhanced.py \
-  yerbpool/*.py \
-  scripts/check-accounting.py
-```
-
-After deployment:
+Check a deployed pool:
 
 ```bash
 curl -s https://pool.yerbas.org/api/health | python3 -m json.tool
@@ -271,19 +76,15 @@ cd /opt/yerb-pool
 sudo -u yerbpool python3 scripts/check-accounting.py
 ```
 
-For the production baseline, both should report healthy accounting before further development continues.
+Healthy reconciliation reports `ok: true` and zero differences. Investigate discrepancies before changing balances.
 
+## Development
 
-## Pool-monitor compatibility
+From the repository root:
 
-Public read-only monitoring endpoints are exposed through compatibility aliases such as `/api/stats`, `/api/status`, `/api/pools`, and `/api/network`. On HTTPS-enabled installations, `scripts/install-pool-monitor-http-compat.sh` can allow only those harmless monitoring endpoints to answer directly over HTTP for external mining aggregators that do not follow HTTP-to-HTTPS redirects; all other HTTP traffic continues to redirect to HTTPS.
+```bash
+python3 -m unittest discover -s tests
+node tests/test_dashboard_loading.cjs
+```
 
-
-### Mining pool aggregator compatibility
-
-The public pool API exposes a Miningcore-compatible discovery surface for external aggregators:
-
-- `/api/pools` — Miningcore-style `pools[]` response with both legacy and modern hashrate key spellings.
-- `/api/pools/yerbas/blocks` — Miningcore-style pool block history.
-- `/api/mps.json` — small flat fallback response with pool/network hashrate, current network height, miners, workers and last pool block.
-- The HTTP compatibility installer permits these read-only routes without disabling HTTPS redirection for the normal website.
+Node.js is needed only for the JavaScript loading test. Live configuration, databases, logs, and native build output are excluded from Git.
