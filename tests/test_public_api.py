@@ -219,6 +219,65 @@ class PublicApiTest(unittest.TestCase):
         self.assertEqual(finder["blocks_found"][0]["height"], 1000)
 
 
+    def test_public_summary_is_stable_and_excludes_active_treasury(self):
+        from unittest.mock import patch
+        cached = {"height": 1000,
+                  "accounts": {"accounts": 2, "active_miners": 4, "total_wallets": 30,
+                               "miner_balance_atomic": 100, "immature_atomic": 50},
+                  "workers": {"active_workers": 2}}
+        with self.db._connect() as con:
+            con.execute("UPDATE accounts SET balance_atomic=30,immature_balance_atomic=10 WHERE address='yMinerA'")
+        with patch.object(api, "_base_summary", return_value=cached), \
+             patch.object(api, "get_treasury_address", return_value="yMinerA"), \
+             patch.object(api.admin.live, "api_luck", return_value={}), \
+             patch.object(api, "effective_public_settings", return_value={}):
+            first = api.public_summary()
+            second = api.public_summary()
+        self.assertEqual(first["accounts"], second["accounts"])
+        self.assertEqual(first["accounts"]["active_miners"], 3)
+        self.assertEqual(first["accounts"]["accounts"], 3)
+        self.assertEqual(first["accounts"]["miner_balance_atomic"], 70)
+        self.assertEqual(first["accounts"]["immature_atomic"], 40)
+        self.assertEqual(cached["accounts"]["active_miners"], 4)
+        self.assertEqual(cached["accounts"]["miner_balance_atomic"], 100)
+        expected = api.pool_monitor_compat(first)["miners"]
+        try:
+            with patch.object(api, "public_summary", return_value=first), \
+                 patch.object(api.admin.live, "api_luck", return_value={}), \
+                 patch.object(api, "effective_public_settings", return_value={}), \
+                 patch.object(api, "read_payout_status", return_value={}), \
+                 patch.object(api, "get_pool_fee_percent", return_value=0.5):
+                self.assertEqual(api.api_pool(force=True)["miners"], expected)
+            self.assertEqual(api.mps_flat_compat(first)["miners"], expected)
+            self.assertEqual(api.miningcore_pool_compat(first)["poolStats"]["connectedMiners"], expected)
+        finally:
+            api._pool_cache = None
+            api._pool_cache_at = 0
+
+    def test_block_timestamp_aliases_agree(self):
+        from datetime import datetime
+        for block in api.api_blocks_enhanced(limit=2):
+            self.assertEqual(block["timestamp"], block["submitted_at"])
+            self.assertEqual(int(datetime.fromisoformat(block["created"].replace("Z", "+00:00")).timestamp()), block["submitted_at"])
+
+    def test_pool_endpoint_reports_network_height_independently_of_last_block(self):
+        from unittest.mock import patch
+        summary = {"height": 1141822, "blocks": {"height": 1141822},
+                   "accounts": {}, "workers": {}, "payouts": {}}
+        luck = {"last_block_height": 1141816}
+        try:
+            with patch.object(api, "public_summary", return_value=summary), \
+                 patch.object(api.admin.live, "api_luck", return_value=luck), \
+                 patch.object(api, "effective_public_settings", return_value={}), \
+                 patch.object(api, "read_payout_status", return_value={}), \
+                 patch.object(api, "get_pool_fee_percent", return_value=0.5):
+                result = api.api_pool(force=True)
+            for key in ("height", "block_height", "network_height", "blockHeight", "networkHeight"):
+                self.assertEqual(result[key], 1141822)
+        finally:
+            api._pool_cache = None
+            api._pool_cache_at = 0
+
     def test_pool_monitor_compatibility_shapes(self):
         summary = {
             "height": 1128957,

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Additive health/diagnostics layer for the existing YERB Pool dashboard."""
 
+import copy
 import csv
 import html
 import io
@@ -74,20 +75,26 @@ admin._public_settings = effective_public_settings
 
 def public_summary():
     """Keep the internal treasury out of public miner/account totals."""
-    result = _base_summary()
+    result = copy.deepcopy(_base_summary())
     treasury = get_treasury_address(admin.CFG)
     if treasury:
         try:
             with admin.live.base.db() as con:
                 row = admin.live.base.one(
                     con,
-                    """SELECT balance_atomic,immature_balance_atomic
+                    """SELECT balance_atomic,immature_balance_atomic,
+                              enabled AND EXISTS(
+                                  SELECT 1 FROM workers WHERE account_id=accounts.id
+                                  AND last_seen_at>=?
+                              ) AS active
                        FROM accounts WHERE address=?""",
-                    (treasury,),
+                    (int(time.time()) - 3600, treasury),
                 )
             accounts = result.get("accounts", {})
             if row:
-                accounts["accounts"] = max(0, int(accounts.get("accounts") or 0) - 1)
+                accounts["total_wallets"] = max(0, int(accounts.get("total_wallets") or 0) - 1)
+                if row.get("active"):
+                    accounts["active_miners"] = max(0, int(accounts.get("active_miners") or 0) - 1)
                 accounts["miner_balance_atomic"] = max(
                     0,
                     int(accounts.get("miner_balance_atomic") or 0)
@@ -100,6 +107,9 @@ def public_summary():
                 )
         except Exception:
             pass
+
+    accounts = result.get("accounts", {})
+    accounts["accounts"] = int(accounts.get("active_miners", accounts.get("accounts", 0)) or 0)
 
     # Additive fields keep the existing dashboard contract intact while making
     # /api/summary useful as a complete pool-monitoring response.
@@ -351,6 +361,8 @@ def api_blocks_enhanced(status=None, limit=100, offset=0):
     for block in result:
         confirmations = int(block.get("confirmations") or 0)
         status_name = str(block.get("status") or "")
+        block["timestamp"] = block.get("submitted_at")
+        block["created"] = _iso_utc(block.get("submitted_at"))
         block["normalized_status"] = "pending" if status_name in ("submitted", "confirmed") else status_name
         block["confirmation_progress"] = min(1.0, confirmations / maturity)
         block["reward"] = _coin_string(block.get("reward_atomic"))
@@ -1192,7 +1204,13 @@ def api_pool(force=False):
         or payout_cfg.get("check_interval_seconds", 7200)
     )
 
+    height = pool_monitor_compat(summary).get("height")
     result = {
+        "height": height,
+        "block_height": height,
+        "network_height": height,
+        "blockHeight": height,
+        "networkHeight": height,
         "name": "YERB Pool",
         "algorithm": "GhostRider",
         "stratum": "stratum+tcp://pool.yerbas.org:3333",
@@ -1206,7 +1224,7 @@ def api_pool(force=False):
             luck.get("hashrate_window_seconds") or admin.live.HASHRATE_WINDOW
         ),
         "network_difficulty": luck.get("network_difficulty"),
-        "miners": int(summary.get("accounts", {}).get("accounts") or 0),
+        "miners": int(summary.get("accounts", {}).get("active_miners") or 0),
         "active_workers": int(summary.get("workers", {}).get("active_workers") or 0),
         "blocks_found": int(summary.get("blocks", {}).get("blocks") or 0),
         "pending_blocks": int(summary.get("blocks", {}).get("pending") or 0),

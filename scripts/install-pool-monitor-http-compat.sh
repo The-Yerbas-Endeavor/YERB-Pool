@@ -24,7 +24,7 @@ from pathlib import Path
 
 path = Path(sys.argv[1])
 text = path.read_text()
-compat_regex = r'^/api/(?:summary|stats|status|pool_stats|poolstats|luck|health|blocks|network(?:/stats)?|pool/stats|mps(?:\.json)?|pools(?:/yerbas(?:/blocks)?)?|pool/yerbas/blocks)$'
+compat_regex = r'^/api/(?:summary|stats|status|pool_stats|poolstats|luck|health|blocks|network(?:/stats)?|pool(?:/stats)?|mps(?:\.json)?|pools(?:/yerbas(?:/blocks)?)?|pool/yerbas/blocks)$'
 
 if "pool-monitor-http-compat" in text:
     marker_pos = text.index("pool-monitor-http-compat")
