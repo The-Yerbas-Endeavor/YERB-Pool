@@ -183,7 +183,10 @@ PY
 }
 
 ensure_core_conf() {
-    if [[ -f "$CORE_CONF" ]]; then
+    # The invoking user may not traverse the protected Core data directory.
+    # Check with the same privileges used to write it, or an existing config
+    # can be mistaken for a missing file and overwritten.
+    if $SUDO test -f "$CORE_CONF"; then
         echo "Existing $CORE_CONF detected; preserving it."
         return
     fi

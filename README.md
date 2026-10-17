@@ -34,6 +34,10 @@ bash install.sh
 
 The installer backs up an existing installation, sets up Yerbas Core and local RPC, builds the native GhostRider verifier, and installs the pool under `/opt/yerb-pool`. It also installs systemd services and applies host security settings, including firewall rules.
 
+## Existing installations
+
+The top-level `install.sh` provisions Yerbas Core, application services, and host security settings. It is not a web-only updater. For a running pool, back up the deployment and apply reviewed application changes separately, restarting only the affected service. Do not rerun the full installer just to publish dashboard or API changes.
+
 ## Configuration and payouts
 
 See [config.example.json](config.example.json) for available settings. The installed configuration is `/opt/yerb-pool/config.json`; keep RPC credentials private.
