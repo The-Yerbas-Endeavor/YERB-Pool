@@ -1118,7 +1118,22 @@ def _wallet_health():
     started = time.perf_counter()
     try:
         info = admin.live.base.rpc_call("getblockchaininfo")
+        # Optional version metadata must not turn a healthy wallet offline.
+        version = None
+        version_string = None
+        try:
+            network = admin.live.base.rpc_call("getnetworkinfo")
+            candidate = network.get("version") if isinstance(network, dict) else None
+            if isinstance(candidate, int) and not isinstance(candidate, bool) and candidate > 0:
+                version = candidate
+                version_string = ".".join(str(part) for part in (
+                    version // 1000000, version // 10000 % 100,
+                    version // 100 % 100, version % 100))
+        except Exception:
+            pass
         return {
+            "version": version,
+            "version_string": version_string,
             "online": True,
             "latency_ms": round((time.perf_counter() - started) * 1000, 2),
             "blocks": int(info.get("blocks", 0)) if isinstance(info, dict) else None,

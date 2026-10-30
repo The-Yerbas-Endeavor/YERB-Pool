@@ -340,6 +340,25 @@ class PublicApiTest(unittest.TestCase):
         self.assertIsNotNone(blocks[0]["created"])
 
 
+
+
+class WalletVersionHealthTest(unittest.TestCase):
+    def test_version_metadata_and_optional_rpc_failure(self):
+        from unittest.mock import patch
+        for network in ({"version": 4000102}, {}, RuntimeError("unavailable")):
+            with self.subTest(network=network):
+                def rpc(method):
+                    if method == "getblockchaininfo":
+                        return {"blocks": 123, "headers": 123, "verificationprogress": 1}
+                    if isinstance(network, Exception):
+                        raise network
+                    return network
+                with patch.object(api.admin.live.base, "rpc_call", side_effect=rpc):
+                    result = api._wallet_health()
+                self.assertTrue(result["online"])
+                self.assertEqual(result["blocks"], 123)
+                self.assertEqual(result["version_string"], "4.0.1.2" if network == {"version": 4000102} else None)
+
 if __name__ == "__main__":
     unittest.main()
 

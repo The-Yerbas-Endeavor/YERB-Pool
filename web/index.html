@@ -8,6 +8,10 @@
 :root{color-scheme:dark}*{box-sizing:border-box}body{font-family:system-ui,sans-serif;background:#111;color:#eee;margin:0}a{color:#9fd3ff;text-decoration:none}a:hover{text-decoration:underline}header{padding:24px;background:#181818;border-bottom:1px solid #2a2a2a}.head{max-width:1200px;margin:auto}.brand{display:flex;justify-content:space-between;gap:20px;align-items:center;flex-wrap:wrap}nav{display:flex;gap:16px;flex-wrap:wrap}nav a{color:#ddd;font-weight:600}.muted{color:#aaa}.small{font-size:12px}main{max-width:1200px;margin:auto;padding:24px}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:14px}.card{display:block;background:#1b1b1b;padding:18px;border:1px solid #2c2c2c;border-radius:10px;color:#eee;transition:.15s ease}.card:hover{border-color:#555;transform:translateY(-1px);text-decoration:none}.card .muted{margin-bottom:4px}.value{font-size:28px;font-weight:700}.section-head{display:flex;justify-content:space-between;gap:12px;align-items:center}table{width:100%;border-collapse:collapse;margin-top:12px;background:#181818}th,td{padding:10px;border-bottom:1px solid #2a2a2a;text-align:left;font-size:14px;vertical-align:top}section{margin-top:26px}.table-wrap{overflow-x:auto}code{font-size:12px;word-break:break-all}.badge{display:inline-block;padding:3px 8px;border-radius:999px;border:1px solid #444;background:#222;font-size:12px}.ok{color:#9fe3a7}.bad{color:#ffaaaa}.copy{font-size:11px;margin-left:6px;background:#252525;border:1px solid #444;border-radius:5px;color:#ddd;padding:2px 6px;cursor:pointer}.empty{padding:18px;color:#888;background:#181818;border:1px solid #252525;border-radius:8px}.back{display:inline-block;margin-bottom:14px}.chart-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(360px,1fr));gap:16px}.chart-card{background:#181818;border:1px solid #2c2c2c;border-radius:10px;padding:16px;min-width:0}.chart-card h3{margin:0 0 4px}.chart{width:100%;height:240px;display:block;margin-top:12px}.chart text{fill:#999;font-size:10px}.chart .gridline{stroke:#2d2d2d;stroke-width:1}.chart .line-main{fill:none;stroke:#9fd3ff;stroke-width:2}.chart .bar-ok{fill:#9fe3a7}.chart .bar-bad{fill:#ffaaaa}.legend{display:flex;gap:16px;flex-wrap:wrap;margin-top:8px;font-size:12px}.dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:5px}.dot.okdot{background:#9fe3a7}.dot.baddot{background:#ffaaaa}.dot.hashdot{background:#9fd3ff}.worker-bar{display:grid;grid-template-columns:minmax(100px,1fr) 3fr auto;gap:12px;align-items:center;margin:10px 0}.worker-bar-track{height:10px;background:#262626;border-radius:999px;overflow:hidden}.worker-bar-fill{height:100%;background:#9fd3ff;border-radius:999px}.address-cell{min-width:260px;background:#151915}.address-cell .small{margin-top:5px}
 .hash-head{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap}.hash-range{display:flex;gap:7px;flex-wrap:wrap}.hash-range button{background:#24242c;color:#eee;border:1px solid #666b78;border-radius:7px;padding:6px 11px;font-size:11px;font-weight:700;cursor:pointer}.hash-range button.active{background:rgba(101,196,102,.15);border-color:#65c466;color:#e2ffe4}.hash-metrics{display:grid;grid-template-columns:repeat(3,minmax(130px,1fr));gap:10px;margin:14px 0}.hash-metric{border:1px solid #2d4332;border-radius:9px;padding:11px 13px;background:#141816}.hash-metric span{display:block;color:#9caf9d;font-size:11px}.hash-metric strong{display:block;color:#e9f7ea;font-size:19px;margin-top:3px}.hash-metric small{display:block;color:#829184;font-size:10px;margin-top:3px}.combined-chart-wrap{position:relative;margin-top:8px}.combined-hash-chart{width:100%;height:340px;display:block;cursor:crosshair;overflow:visible}.combined-hash-chart .gridline{stroke:#2d2d2d;stroke-width:1}.combined-hash-chart .pool-line{fill:none;stroke:#65c466;stroke-width:2.6;vector-effect:non-scaling-stroke}.combined-hash-chart .network-line{fill:none;stroke:#45a3ff;stroke-width:2.4;vector-effect:non-scaling-stroke}.combined-hash-chart .pool-area{fill:rgba(101,196,102,.11)}.combined-hash-chart .network-area{fill:rgba(69,163,255,.07)}.combined-hash-chart .axis{font-size:10px;fill:#8ea091}.combined-hash-chart .pool-axis{fill:#80d985}.combined-hash-chart .net-axis{fill:#6eb7ff}.hash-crosshair{stroke:#8b968d;stroke-width:1;stroke-dasharray:4 4;opacity:0;vector-effect:non-scaling-stroke}.combined-hash-tooltip{position:absolute;z-index:9;pointer-events:none;min-width:180px;padding:9px 11px;border:1px solid #35503b;border-radius:8px;background:rgba(9,14,11,.97);font-size:11px;line-height:1.55;color:#e6efe7;transform:translate(-50%,-112%)}.hash-legend{display:flex;justify-content:center;gap:22px;flex-wrap:wrap;margin-top:9px;font-size:12px}.hash-dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px}.hash-dot.pool{background:#65c466}.hash-dot.net{background:#45a3ff}.hash-footer{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-top:8px;color:#718477;font-size:10px}
 @media(max-width:900px){.hash-metrics{grid-template-columns:repeat(2,minmax(130px,1fr))}}@media(max-width:520px){main{padding:14px}.chart-grid{grid-template-columns:1fr}.value{font-size:23px}.worker-bar{grid-template-columns:1fr auto}.worker-bar-track{grid-column:1/-1}.hash-metrics{grid-template-columns:1fr}.combined-hash-chart{height:300px}}
+#combined-hash-card .hash-metrics{grid-template-columns:repeat(4,minmax(0,1fr))}
+@media(min-width:1400px){#combined-hash-card .hash-metrics{grid-template-columns:repeat(8,minmax(0,1fr))}}
+@media(max-width:700px){#combined-hash-card .hash-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:460px){#combined-hash-card .hash-metrics{grid-template-columns:1fr}}
 </style>
 </head>
 <body>
@@ -87,6 +91,47 @@ async function payouts(){const p=await get('/api/payouts?limit=500');app.innerHT
 async function account(){const a=decodeURIComponent(location.pathname.slice('/account/'.length)),x=await get('/api/account/'+encodeURIComponent(a)),stats=await Promise.all((x.workers||[]).map(w=>get('/api/worker/'+w.id+'/stats?hours=24&bucket=300').catch(()=>null))),h=aggregateHistory(stats.filter(Boolean)),latest=h.slice(-2).reduce((s,v)=>s+Number(v.hashrate||0),0)/Math.max(1,Math.min(2,h.length));app.innerHTML=`<a class="back" href="/miners">← Miners</a><section><h2>Miner Account</h2><div>${addressLink(x.address)} &nbsp; ${explorerAddress(x.address)}</div><div class="grid" style="margin-top:18px"><div class="card"><div class="muted">Balance</div><div class="value">${coin(x.balance_atomic)}</div><div>YERB</div></div><div class="card"><div class="muted">Immature</div><div class="value">${coin(x.immature_balance_atomic)}</div><div>YERB</div></div><div class="card"><div class="muted">Total Earned</div><div class="value">${coin(x.total_earned_atomic)}</div><div>YERB</div></div><div class="card"><div class="muted">Total Paid</div><div class="value">${coin(x.total_paid_atomic)}</div><div>YERB</div></div><div class="card"><div class="muted">Combined Hashrate</div><div class="value">${hashRate(latest)}</div></div></div></section><section><h2>Worker Statistics — last 24 hours</h2>${h.length?`<div class="chart-grid"><div class="chart-card"><h3>Combined Hashrate</h3>${lineChart(h,'hashrate',hashRate)}</div><div class="chart-card"><h3>Share Activity</h3>${shareChart(h)}</div></div>`:'<div class="empty">No worker history recorded yet.</div>'}</section><section><h2>Workers</h2>${x.workers.length?table(['Worker','Accepted','Rejected','Last Seen'],x.workers.map(w=>`<tr><td><a href="/worker/${w.id}"><code>${esc(w.name)}</code></a></td><td>${w.accepted_shares}</td><td>${w.rejected_shares}</td><td>${ago(w.last_seen_at)}</td></tr>`)):'<div class="empty">No workers.</div>'}</section><section><h2>Ledger</h2>${x.ledger.length?table(['Time','Type','Amount','Block','Note'],x.ledger.map(l=>`<tr><td>${when(l.ts)}</td><td>${status(l.entry_type)}</td><td>${coin(l.amount_atomic)} YERB</td><td>${l.block_id??'—'}</td><td>${esc(l.note||'')}</td></tr>`)):'<div class="empty">No ledger entries.</div>'}</section><section><h2>Payout History</h2>${x.payouts.length?table(['ID','Status','Amount','Sent','TXID'],x.payouts.map(p=>`<tr><td>#${p.id}</td><td>${status(p.status)}</td><td>${coin(p.amount_atomic)} YERB</td><td>${when(p.sent_at)}</td><td>${explorerTx(p.txid)}</td></tr>`)):'<div class="empty">No payouts.</div>'}</section>`}
 async function route(){try{const p=location.pathname;if(p==='/')return dashboard();if(p==='/miners')return miners();if(p==='/workers')return workers();if(p==='/shares')return shares();if(p==='/blocks'||p==='/blocks/pending')return blocks();if(p==='/payouts')return payouts();if(p.startsWith('/account/'))return account();if(p.startsWith('/worker/'))return worker();app.innerHTML='<div class="empty">Page not found.</div>'}catch(e){app.innerHTML=`<div class="empty bad">${esc(e.message)}</div>`}}
 route();
+// Keep live node metrics inside the chart's metric row across range changes.
+let nodeMetricsBusy=false,nodeMetricsData=null;
+function renderNodeMetrics(){
+  if(location.pathname!=='/')return;
+  const row=document.querySelector('#combined-hash-card .hash-metrics');
+  if(!row)return;
+  for(const [key,label] of [['height','Current Chain Height'],['version','Wallet Version']]){
+    if(!row.querySelector('[data-node-metric="'+key+'"]')){
+      const metric=document.createElement('div');metric.className='hash-metric';
+      metric.dataset.nodeMetric=key;
+      const title=document.createElement('span');title.textContent=label;
+      const value=document.createElement('strong');value.textContent='Loading…';
+      metric.append(title,value);row.appendChild(metric);
+    }
+  }
+  if(nodeMetricsData){
+    for(const [key,value] of Object.entries(nodeMetricsData)){
+      const target=row.querySelector('[data-node-metric="'+key+'"] strong');
+      if(target&&target.textContent!==value)target.textContent=value;
+    }
+  }
+}
+async function refreshNodeMetrics(){
+  renderNodeMetrics();
+  if(nodeMetricsBusy||location.pathname!=='/'||!document.querySelector('[data-node-metric]'))return;
+  nodeMetricsBusy=true;
+  const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),10000);
+  try{
+    const response=await fetch('/api/health',{cache:'no-store',signal:controller.signal});
+    if(!response.ok)throw new Error('Health request failed');
+    const {wallet={}}=await response.json();
+    nodeMetricsData={height:wallet.online&&Number.isInteger(wallet.blocks)?wallet.blocks.toLocaleString():'Unavailable',version:wallet.online&&wallet.version_string?wallet.version_string:'Unavailable'};
+  }catch(error){nodeMetricsData={height:'Unavailable',version:'Unavailable'};}
+  finally{clearTimeout(timer);nodeMetricsBusy=false;renderNodeMetrics();}
+}
+let nodeMetricsTimer;
+new MutationObserver(()=>{
+  clearTimeout(nodeMetricsTimer);
+  nodeMetricsTimer=setTimeout(()=>{renderNodeMetrics();if(!nodeMetricsData)refreshNodeMetrics();},100);
+}).observe(app,{childList:true,subtree:true});
+setInterval(refreshNodeMetrics,30000);
 </script>
 </body>
 </html>

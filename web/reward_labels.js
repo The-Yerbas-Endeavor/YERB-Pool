@@ -117,6 +117,20 @@
       {name:'cpuminer-gr-avx2',url:'https://github.com/WyvernTKC-GR/cpu-miner-gr-avx2/archive/refs/heads/main.zip',downloadLabel:'Download source',type:'CPU',command:'cpuminer-gr-avx2 -a gr -o stratum+tcp://pool.yerbas.org:3333 -u YOUR_YERB_ADDRESS.avx2 -p x'}
     ];
 
+    if(!document.getElementById('home-miner-highlight-style')){
+      const style=document.createElement('style');
+      style.id='home-miner-highlight-style';
+      style.textContent=`
+        #miner-commands .recommended-card{padding:20px;border:1px solid rgba(101,196,102,.7)!important;border-radius:12px;background:linear-gradient(145deg,#1b2b1e,#121813);box-shadow:0 0 0 1px rgba(101,196,102,.08),0 12px 30px rgba(0,0,0,.18)}
+        #miner-commands .recommended-title{font-size:20px;font-weight:800;color:#eefbef}
+        #miner-commands .recommended-badges{display:flex;gap:7px;flex-wrap:wrap;margin-top:7px}
+        #miner-commands .recommended-badge{font-size:11px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;border:1px solid #4e8756;border-radius:999px;padding:4px 8px;color:#bff2c3;background:#17251a}
+        #miner-commands .download-release{display:inline-block;padding:9px 13px;border-radius:7px;background:#2d7138;color:#fff;text-decoration:none;font-weight:800;border:1px solid #65c466}
+        #miner-commands .download-release:hover{background:#368544;color:#fff;text-decoration:none}
+        #miner-commands .recommended-copy{color:#aebcaf;margin-bottom:13px}
+      `;
+      document.head.appendChild(style);
+    }
     const section=document.createElement('section');
     section.id='miner-commands';
     section.innerHTML=`<div class="section-head"><div><h2 style="margin-bottom:4px">Prebuilt Miner Commands</h2><div class="muted">Enter your Yerbas payout address below. All commands update automatically; worker names after the dot can be changed.</div></div></div>
@@ -127,7 +141,7 @@
           style="width:100%;box-sizing:border-box;font-family:monospace;padding:11px 12px;border-radius:7px;border:1px solid rgba(100,255,140,.35);background:#0b120d;color:inherit" />
         <div id="miner-address-message" class="small muted" style="margin-top:7px">Commands will update as you type.</div>
       </div>
-      <div style="display:grid;gap:10px;margin-top:10px">${commands.map((m,i)=>`<div class="card" style="padding:14px"><div style="display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:8px;flex-wrap:wrap"><div><strong>${esc(m.name)}</strong> <span class="small muted">${esc(m.type)}</span></div><div style="display:flex;align-items:center;gap:12px"><a href="${esc(m.url)}" target="_blank" rel="noopener noreferrer" aria-label="${esc(m.downloadLabel)} ${esc(m.name)}">${esc(m.downloadLabel)} ↗</a><button type="button" class="miner-copy-btn" data-command-index="${i}" style="cursor:pointer">Copy</button></div></div><input class="miner-command-input" data-command-index="${i}" data-template="${esc(m.command)}" type="text" readonly value="${esc(m.command)}" style="width:100%;box-sizing:border-box;font-family:monospace;padding:10px 12px;border-radius:7px;border:1px solid rgba(100,255,140,.25);background:#0b120d;color:inherit" /></div>`).join('')}</div>`;
+      <div style="display:grid;gap:10px;margin-top:10px">${commands.map((m,i)=>`<div class="${m.name==='Yerbas Miner'?'recommended-card':'card'}" style="${m.name==='Yerbas Miner'?'':'padding:14px'}"><div style="display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:8px;flex-wrap:wrap">${m.name==='Yerbas Miner'?'<div><div class="recommended-title">Yerbas Miner</div><div class="recommended-badges"><span class="recommended-badge">Hybrid</span><span class="recommended-badge">CPU + NVIDIA GPU</span></div></div>':`<div><strong>${esc(m.name)}</strong> <span class="small muted">${esc(m.type)}</span></div>`}<div style="display:flex;align-items:center;gap:12px"><a class="${m.name==='Yerbas Miner'?'download-release':''}" href="${esc(m.url)}" target="_blank" rel="noopener noreferrer" aria-label="${esc(m.downloadLabel)} ${esc(m.name)}">${m.name==='Yerbas Miner'?'Download latest release':esc(m.downloadLabel)} ↗</a><button type="button" class="miner-copy-btn" data-command-index="${i}" style="cursor:pointer">Copy</button></div></div>${m.name==='Yerbas Miner'?'<div class="recommended-copy">Native Yerbas GhostRider miner with combined CPU and NVIDIA CUDA mining support.</div>':''}<input class="miner-command-input" data-command-index="${i}" data-template="${esc(m.command)}" type="text" readonly value="${esc(m.command)}" style="width:100%;box-sizing:border-box;font-family:monospace;padding:10px 12px;border-radius:7px;border:1px solid rgba(100,255,140,.25);background:#0b120d;color:inherit" /></div>`).join('')}</div>`;
 
     const connectHeading=[...main.querySelectorAll('h1,h2,h3')].find(h=>h.textContent.toLowerCase().includes('connect to yerb pool'));
     const connectSection=connectHeading?.closest('section');

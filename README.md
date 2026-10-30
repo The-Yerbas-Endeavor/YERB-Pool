@@ -82,6 +82,16 @@ sudo -u yerbpool python3 scripts/check-accounting.py
 
 Healthy reconciliation reports `ok: true` and zero differences. Investigate discrepancies before changing balances.
 
+## Core 4.0.1.2 upgrade
+
+The dashboard reports the running Core version and current chain height inside the hashrate metrics, refreshed every 30 seconds.
+
+For an existing 3.2.0.21 pool using `/usr/local/bin` and `/home/yerbas/.yerbascore`, use `scripts/upgrade-yerbas-core-4.0.1.2.sh` rather than the full installer. This helper is specific to Ubuntu 26.04 x86-64. Place the official `yerbas-ubuntu-26.04-x86-release-4.0.1.2.tar.gz` beside the helper as `release.tar.gz`, then run the helper with sudo. It verifies the pinned release checksum, backs up the wallet and complete offline Core data directory, preserves configuration byte-for-byte, and resumes mining only after node readiness checks. It needs enough free space for the full backup plus 2 GiB.
+
+Release notes and downloads: https://github.com/The-Yerbas-Endeavor/yerbas/releases/tag/v4.0.1.2
+
+A failed upgrade leaves mining stopped for inspection. Do not automatically downgrade to 3.x: recorded recovery transactions can make that unsafe. This helper does not deploy web changes.
+
 ## Development
 
 From the repository root:
